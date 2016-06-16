@@ -2,21 +2,31 @@ import numpy as np
 import scipy.sparse as sps
 import scipy.sparse.linalg as sps_linalg
 
+# whether to profile
+if True:
+    def profile(function):
+        return function
+
 class Groupby:
+    @profile
     def __init__(self, keys):
-        self.unique_keys = frozenset(keys)
-        self.set_indices(keys)
+        _, self.keys_as_int = np.unique(keys, return_inverse = True)
+        self.n_keys = max(self.keys_as_int)
+        self.set_indices()
         
-    def set_indices(self, keys):
-        self.indices = {k:[] for k in self.unique_keys}
-        for i, k in enumerate(keys):
+    @profile
+    def set_indices(self):
+        self.indices = [[] for i in range(self.n_keys+1)]
+        for i, k in enumerate(self.keys_as_int):
             self.indices[k].append(i)
-            
+        self.indices = [np.array(elt) for elt in self.indices]
+        
+    @profile  
     def apply(self, function, vector):
         result = np.zeros(len(vector))
-        for k in self.unique_keys:
+        for k in range(self.n_keys):
             result[self.indices[k]] = function(vector[self.indices[k]])
-        return result
+        return result 
 
 @profile
 def estimate_with_alternating_projections(y, z, categorical_data):
