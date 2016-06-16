@@ -1,4 +1,6 @@
 import numpy as np
+import scipy.sparse as sps
+import scipy.sparse.linalg as sps_linalg
 
 class Groupby:
     def __init__(self, keys):
@@ -15,54 +17,59 @@ class Groupby:
         for k in self.unique_keys:
             result[self.indices[k]] = function(vector[self.indices[k]])
         return result
-    
-    
+
+@profile
 def estimate_with_alternating_projections(y, z, categorical_data):
+    z = np.expand_dims(z, 1)
+    n_cols =  z.shape[1] 
     n, num_fes = categorical_data.shape
     
-    # initialize
-    y = y - np.mean(y)  
-    if len(z.shape) ==1:
-        z = np.expand_dims(z, 1)
-        
-    beta = np.linalg.lstsq(z, y)[0]
-    residual = y - np.dot(z, beta)
-    ssr =  np.dot(residual, residual)
-    ssr_last = 10 * ssr
-    i = 0
-    
-    fixed_effects = np.zeros((n, num_fes))
     grouped = [Groupby(categorical_data[:, i]) for i in range(num_fes)]
-
-    print('\n ratio')
-    print((ssr_last - ssr) / ssr_last)
-    print("beta " + str(beta))
+    z_projected = np.zeros(z.shape)
     
-    while (ssr_last - ssr) / ssr_last > 10**(-5):
-        print("i" + str(i))
-        # first update fixed effects
-        for j in range(num_fes):
-            print(j)
-            residual = residual + fixed_effects[:, j]
-            fixed_effects[:, j] = grouped[j].apply(np.mean, residual)
-            residual = residual - fixed_effects[:, j]
-            assert(np.dot(residual, residual) < ssr_last)
-            
-        # then update beta
-        beta = np.linalg.lstsq(z, y - np.sum(fixed_effects, axis = 1))[0]
-        # Then update loop variables
-        ssr_last = ssr
-        ssr = np.dot(residual, residual)
-        assert(ssr < ssr_last)
-        print('\n ratio')
-        print((ssr_last - ssr) / ssr_last)
-        print("beta " + str(beta))
-        i+= 1
+    # Project each column of z onto dummies
+    for col in range(n_cols):
+        fixed_effects = np.zeros((n, num_fes))
+        ssr = np.dot(z[:, col], z[:, col])
+        ssr_last = 10 * ssr
+        
+        while (ssr_last - ssr) / ssr_last > 10**(-5):
+            ssr_last = ssr
+            residual = z[:, col] - np.sum(fixed_effects, 1)
+            for fe in range(num_fes):
+                fixed_effects[:, fe] = fixed_effects[:, fe] \
+                                     + grouped[fe].apply(np.mean, residual)
+                residual = z[:, col] - np.sum(fixed_effects, 1)
+            ssr = np.dot(residual, residual)
+                
+        z_projected[:, col] = z[:, col] - np.sum(fixed_effects, 1)
+        
+    beta = np.linalg.lstsq(z_projected, y)[0]
 
-    return beta, fixed_effects 
+    return beta, 1
+    
+def estimate_brute_force(y, z, categorical_data):
+    k = z.shape[1] if len(z.shape) > 1 else 1
+    print(k)
+    num_fes = categorical_data.shape[1]
+    
+    def get_dummies(v):
+        _, data_as_int = np.unique(v, return_inverse = True)
+        return sps.csc_matrix((np.ones(len(v)), (range(len(v)), v)))
+        
+    dummies = sps.hstack([get_dummies(categorical_data[:, i]) 
+                          for i in range(num_fes)]).astype(int)
+    z = sps.csc_matrix(np.expand_dims(z, 1))
+    rhs = sps.hstack((z, dummies))
+    params = sps_linalg.lsqr(rhs, y)[0]
+    return params[:k], params[k:]
+    
     
 def estimate_coefficients(y, z, categorical_data, method):
     if method == 'alternating projections':
         return estimate_with_alternating_projections(y, z, categorical_data)
+    elif method == 'brute force':
+        return estimate_brute_force(y, z, categorical_data)
+
     print('You did not specify a valid method.')
     return
