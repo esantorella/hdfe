@@ -1,0 +1,4 @@
+*.cppimporthash
+*.swp
+*.pyc
+.rendered.*.cpp
