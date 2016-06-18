@@ -7,26 +7,38 @@ if True:
     def profile(function):
         return function
 
-class Groupby:
-    @profile
-    def __init__(self, keys):
-        _, self.keys_as_int = np.unique(keys, return_inverse = True)
-        self.n_keys = max(self.keys_as_int) + 1
-        self.set_indices()
+cpp = True
+if cpp:
+    import cppimport
+    cppplay = cppimport.imp("cppplay")
+    class Groupby:
+        def __init__(self, keys):
+            _, self.keys_as_int = np.unique(keys, return_inverse = True)
+            self.internal = cppplay.Groupby(self.keys_as_int.tolist())
 
-    @profile
-    def set_indices(self):
-        self.indices = [[] for i in range(self.n_keys)]
-        for i, k in enumerate(self.keys_as_int):
-            self.indices[k].append(i)
-        self.indices = [np.array(elt) for elt in self.indices]
+        def apply(self, function, vector):
+            return self.internal.apply(vector.tolist(), function)
+else:
+    class Groupby:
+        @profile
+        def __init__(self, keys):
+            _, self.keys_as_int = np.unique(keys, return_inverse = True)
+            self.n_keys = max(self.keys_as_int) + 1
+            self.set_indices()
 
-    @profile
-    def apply(self, function, vector):
-        result = np.zeros(len(vector))
-        for k in range(self.n_keys):
-            result[self.indices[k]] = function(vector[self.indices[k]])
-        return result
+        @profile
+        def set_indices(self):
+            self.indices = [[] for i in range(self.n_keys)]
+            for i, k in enumerate(self.keys_as_int):
+                self.indices[k].append(i)
+            self.indices = [np.array(elt) for elt in self.indices]
+
+        @profile
+        def apply(self, function, vector):
+            result = np.zeros(len(vector))
+            for k in range(self.n_keys):
+                result[self.indices[k]] = function(vector[self.indices[k]])
+            return result
 
 @profile
 def estimate_with_alternating_projections(y, z, categorical_data):
