@@ -6,6 +6,18 @@ setup_pybind11(cfg)
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 
+template <typename T>
+pybind11::array_t<T> make_array(const std::vector<size_t>& shape) {
+    return pybind11::array(pybind11::buffer_info(
+        nullptr,
+        sizeof(T),
+        pybind11::format_descriptor<T>::value(),
+        shape.size(),
+        shape,
+        calc_strides(shape, sizeof(T))
+    ));
+}
+
 struct groupby {
     std::vector<std::vector<int>> indices;
 
@@ -34,7 +46,20 @@ struct groupby {
     }
     
     py::array_t<double> apply_2(py:array_t<double> y, pybind11::object f) {
-        
+        auto y_buf = y.request();
+        py:array_t<double> out = make_array<double>({y.shape[0]});
+        auto out_buf = out.request();
+        for (size_t i = 0; i < indices.size(); i++) {
+            std::vector<double> group_input(indices[i].size());
+            for (size_t j = 0; j < indices[i].size(); j++) {
+                group_input[j] = y_buf.ptr[indices[i][j]];
+            }
+            double group_output = f(group_input).cast<double>();
+            for (size_t j = 0; j < indices[i].size(); j++) {
+                out_buf.ptr[indices[i][j]] = group_output;
+            }
+        }
+        return out;
     }
 
     void print_indices() {
