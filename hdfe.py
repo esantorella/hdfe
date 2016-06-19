@@ -3,7 +3,7 @@ import scipy.sparse as sps
 import scipy.sparse.linalg as sps_linalg
 
 # whether to profile
-if True:
+if False:
     def profile(function):
         return function
 
@@ -12,12 +12,14 @@ if cpp:
     import cppimport
     cppplay = cppimport.imp("cppplay")
     class Groupby:
+        @profile
         def __init__(self, keys):
             _, self.keys_as_int = np.unique(keys, return_inverse = True)
             self.internal = cppplay.Groupby(self.keys_as_int.tolist())
-
+        
+        @profile
         def apply(self, function, vector):
-            return self.internal.apply(vector.tolist(), function)
+            return self.internal.apply_2(vector, function)
 else:
     class Groupby:
         @profile

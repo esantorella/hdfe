@@ -5,7 +5,7 @@ import time
 
 def test_hdfe():
     beta = 3
-    n = 10**6
+    n = 10**4
     k1 = 10**4
     k2 = 10**2
 
