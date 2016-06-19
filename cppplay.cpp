@@ -4,6 +4,7 @@ setup_pybind11(cfg)
 #include <pybind11/pybind11.h>
 #include <algorithm>
 #include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 
 struct groupby {
     std::vector<std::vector<int>> indices;
@@ -30,6 +31,10 @@ struct groupby {
             }
         }
         return out;
+    }
+    
+    py::array_t<double> apply_2(py:array_t<double> y, pybind11::object f) {
+        
     }
 
     void print_indices() {
