@@ -15,7 +15,7 @@ if cpp:
         @profile
         def __init__(self, keys):
             _, self.keys_as_int = np.unique(keys, return_inverse = True)
-            self.internal = cppplay.Groupby(self.keys_as_int.tolist())
+            self.internal = cppplay.Groupby(self.keys_as_int)
         
         @profile
         def apply(self, function, vector):
