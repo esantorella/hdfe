@@ -28,19 +28,19 @@ def test_hdfe():
     y_b = np.dot(z, beta_b) + fes_1b[cat1] + fes_2b[cat2]
     
 
-#    start = time.clock()
-#    beta_hat_bf, _ = estimate_coefficients(y, z, categorical_data, 'brute force')
-#    end = time.clock()
-#    print('brute force time:')
-#    print(end - start)
-#    start = time.clock()
-#    beta_hat_ap, _ = estimate_coefficients(y, z, categorical_data,
-#                                           'alternating projections')
-#    end = time.clock()
+    start = time.clock()
+    beta_hat_bf, _ = estimate_coefficients(y_a, z, categorical_data, 'brute force')
+    end = time.clock()
+    print('brute force time:')
+    print(end - start)
+    start = time.clock()
+    beta_hat_ap, _ = estimate_coefficients(y_a, z, categorical_data,
+                                           'alternating projections')
+    end = time.clock()
 #    print('alternating projections error:')
 #    print(abs(beta_hat_ap - beta_hat_bf))
-#    print('alternating projections time:')
-#    print(end - start)
+    print('alternating projections time:')
+    print(end - start)
     return
 
 if __name__ == "__main__":

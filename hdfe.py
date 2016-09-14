@@ -7,21 +7,26 @@ import time
 if True :
     def profile(function):
         return function
+
+expand_dims = lambda v: np.expand_dims(v, 1) if len(v.shape) == 1 else v
+
         
-def get_all_dummies(categorical_data):
-    num_fes = categorical_data.shape[1]
+def get_all_dummies(categorical_data, drop):
     
     def get_dummies(v):
         _, data_as_int = np.unique(v, return_inverse = True)
-        return sps.csc_matrix((np.ones(len(v)), (range(len(v)), v))), \
-               max(data_as_int) 
-        
-    dummies_and_dims = [get_dummies(categorical_data[:, i]) 
-                        for i in range(num_fes)]
-    dummies = sps.hstack([elt[0] for elt in dummies_and_dims]).astype(int)
-    dims = [elt[1] for elt in dummies_and_dims]
+        dummies = sps.csc_matrix((np.ones(len(v)), (range(len(v)), data_as_int)))
+        if drop:
+            dummies = dummies[:, :-1]
+        return dummies
+    if len(categorical_data.shape) == 1 or categorical_data.shape[1] == 1:
+        return get_dummies(categorical_data)
 
-    return dummies, dims
+    #import ipdb; ipdb.set_trace()
+    num_fes = categorical_data.shape[1]
+    return sps.hstack([get_dummies(categorical_data[:, col]) 
+                       for col in range(num_fes)])
+
 
 cpp = False
 if cpp:
@@ -55,7 +60,7 @@ else:
         @profile
         def apply(self, function, vector, broadcast = True):
             if broadcast:
-                result = np.zeros(len(vector))
+                result = np.zeros(vector.shape)
                 for k in range(self.n_keys):
                     result[self.indices[k]] = function(vector[self.indices[k]])
             else:
@@ -64,11 +69,14 @@ else:
                     result[self.keys_as_int[self.first_occurrences[k]]] = \
                                          function(vector[self.indices[k]])
             return result
+        
 
+# TODO: recover fixed effects
 @profile
 def estimate_with_alternating_projections(y, z, categorical_data):
     k =  z.shape[1]
-    if k == 1: z = np.expand_dims(z, 1) 
+    if k == 1: 
+        z = np.expand_dims(z, 1) 
     n, num_fes = categorical_data.shape
 
     grouped = [Groupby(categorical_data[:, i]) for i in range(num_fes)]
@@ -85,7 +93,7 @@ def estimate_with_alternating_projections(y, z, categorical_data):
             residual = z[:, col] - np.sum(fixed_effects, 1)
             for fe in range(num_fes):
                 fixed_effects[:, fe] = fixed_effects[:, fe] \
-                                     + grouped[fe].apply(np.mean, residual)
+                            + grouped[fe].apply(lambda x: x.mean(), residual)
                 residual = z[:, col] - np.sum(fixed_effects, 1)
             ssr = np.dot(residual, residual)
 
@@ -93,51 +101,60 @@ def estimate_with_alternating_projections(y, z, categorical_data):
 
     beta = np.linalg.lstsq(z_projected, y)[0]
 
-    return beta, 1
+    return beta, fixed_effects
     
+def estimate_within(y, z, categorical_data):
+    assert(len(categorical_data.shape) == 1 or categorical_data.shape[1] == 1)
+    grouped = Groupby(categorical_data)
+    if z is None:
+        fixed_effects = grouped.apply(lambda x: x.mean(), y)    
+        return None, fixed_effects
+
+    if sps.issparse(z):
+        z = z.todense()
+    if len(z.shape) == 1: z = np.expand_dims(z, 1)
+    k = z.shape[1]
+    z_projected_resid = np.zeros(z.shape)
+    for col in range(k):
+        z_projected_resid[:, col] = np.squeeze(z[:, col] - \
+                                   grouped.apply(lambda x: x.mean(), z[:, col]))
+
+    beta = np.linalg.lstsq(z_projected_resid, y)[0]
+    fixed_effects = grouped.apply(lambda x: x.mean(), y - np.dot(z, beta))
+    return beta, fixed_effects
+        
+
 
 def estimate_brute_force(y, z, categorical_data):
-    k = z.shape[1] if len(z.shape) > 1 else 1
-    print(k)
+    if len(z.shape) == 1: z = np.expand_dims(z, 1)
+    if len(categorical_data.shape) == 1:
+        categorical_data = np.expand_dims(categorical_data, 1)
+
     num_fes = categorical_data.shape[1]
 
-    dummies, dims = get_all_dummies(categorical_data) 
+    dummies= get_all_dummies(categorical_data, drop=True) 
     
-    z = sps.csc_matrix(np.expand_dims(z, 1)) if k == 1 \
-        else sps.csc_matrix(z)
     rhs = sps.hstack((z, dummies))
-    params = sps_linalg.lsqr(rhs, y)[0]
-    return params[:k], params[k:]
-    
-    
-def exploit_sparsity_pattern(y, z, categorical_data):
-    k = z.shape[1] if len(z.shape) > 1 else 1
-    num_fes = categorical_data.shape[1]
-    
-    dummies, dims = get_all_dummies(categorical_data) 
-    # assume full rank
-    elt_00 = np.dot(z.T, z)
-    start  = time.clock()
-    elt_01 = np.array(sps.csc_matrix(z.T).dot(dummies)) # may be a faster way to do this
-    print(time.clock() - start)
-    elt_11 = dummies.T.dot(dummies) # almost diagonal
-    start = time.clock()
-    grouped = [Groupby(categorical_data[:, i]) for i in range(num_fes)]
-    elt_01_alt = np.vstack([np.hstack((g.apply(np.sum, z[:,col], False) 
-                                                     for g in grouped)) 
-                                                     for col in range(k)])
-    print(time.clock() - start)
-    return
-    
 
+    params = sps_linalg.lsqr(rhs, y)[0]
+
+    k = z.shape[1]
+    return params[:k], dummies * params[k:]
+    
 
 def estimate_coefficients(y, z, categorical_data, method):
+    print(method)
     if method == 'alternating projections':
         return estimate_with_alternating_projections(y, z, categorical_data)
     elif method == 'brute force':
         return estimate_brute_force(y, z, categorical_data)
     elif method == 'exploit sparsity pattern':
         return exploit_sparsity_pattern(y, z, categorical_data)
+    elif method == 'within':
+        return estimate_within(y, z, categorical_data)
 
     print('You did not specify a valid method.')
+    assert(False)
     return
+
+
