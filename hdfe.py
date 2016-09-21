@@ -15,14 +15,13 @@ def get_all_dummies(categorical_data, drop):
     
     def get_dummies(v):
         _, data_as_int = np.unique(v, return_inverse = True)
-        dummies = sps.csc_matrix((np.ones(len(v)), (range(len(v)), data_as_int)))
+        dummies = sps.csc_matrix((np.ones(len(v)), (range(len(v)),data_as_int)))
         if drop:
             dummies = dummies[:, :-1]
         return dummies
     if len(categorical_data.shape) == 1 or categorical_data.shape[1] == 1:
         return get_dummies(categorical_data)
 
-    #import ipdb; ipdb.set_trace()
     num_fes = categorical_data.shape[1]
     return sps.hstack([get_dummies(categorical_data[:, col]) 
                        for col in range(num_fes)])
@@ -135,7 +134,7 @@ def estimate_brute_force(y, z, categorical_data):
     dummies= get_all_dummies(categorical_data, drop=True) 
     
     rhs = sps.hstack((z, dummies))
-
+    print(rhs.shape)
     params = sps_linalg.lsqr(rhs, y)[0]
 
     k = z.shape[1]
