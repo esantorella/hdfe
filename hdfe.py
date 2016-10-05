@@ -134,7 +134,6 @@ def estimate_brute_force(y, z, categorical_data):
     dummies= get_all_dummies(categorical_data, drop=True) 
     
     rhs = sps.hstack((z, dummies))
-    print(rhs.shape)
     params = sps_linalg.lsqr(rhs, y)[0]
 
     k = z.shape[1]
@@ -142,7 +141,6 @@ def estimate_brute_force(y, z, categorical_data):
     
 
 def estimate_coefficients(y, z, categorical_data, method):
-    print(method)
     if method == 'alternating projections':
         return estimate_with_alternating_projections(y, z, categorical_data)
     elif method == 'brute force':
