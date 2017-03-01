@@ -57,16 +57,21 @@ else:
             self.indices = [np.array(elt) for elt in self.indices]
 
         @profile
-        def apply(self, function, vector, broadcast = True):
+        def apply(self, function, array, broadcast=True, width=None):
             if broadcast:
-                result = np.zeros(vector.shape)
+                if width is None:
+                    result = np.zeros(array.shape)
+                else:
+                    result = np.zeros((array.shape[0], width))
+
                 for k in range(self.n_keys):
-                    result[self.indices[k]] = function(vector[self.indices[k]])
+                    result[self.indices[k]] = function(array[self.indices[k]])
+
             else:
-                result = np.zeros(self.n_keys)
+                result = np.zeros((self.n_keys, width))
                 for k in range(self.n_keys):
-                    result[self.keys_as_int[self.first_occurrences[k]]] = \
-                                         function(vector[self.indices[k]])
+                    result[self.keys_as_int[self.first_occurrences[k]], :] = \
+                                         function(array[self.indices[k]])
             return result
         
 
