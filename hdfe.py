@@ -178,16 +178,16 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
             error = y - x.dot(b)
     # within estimator
     elif len(categorical_controls) == 1:
-        grouped = Groupby(data[categorical_controls[0]])
-        x_demeaned = grouped.apply(lambda z: z - np.mean(z), x)
+        grouped = Groupby(data[categorical_controls[0]].values)
+        x_demeaned = grouped.apply(lambda z: z - np.mean(z, 0), x)
         b = np.linalg.lstsq(x_demeaned, y)[0]
         error = y - x.dot(b)
         fixed_effects = grouped.apply(np.mean, error, broadcast=False)
         b = np.concatenate((fixed_effects, b))
+        x = sps.hstack((make_dummies(data[categorical_controls[0]], False), x))
+        assert b.shape[0] == x.shape[1]
         if estimate_variance or get_residual:
             error -= fixed_effects[data[categorical_controls[0]].values]
-            x = sps.hstack((make_dummies(data[categorical_controls[0]], False), x))
-            assert b.shape[0] == x.shape[1]
     else:
         dummies = get_all_dummies(data[categorical_controls].values)
         x = sps.hstack((dummies, x))
@@ -202,10 +202,10 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
 
     assert np.all(np.isfinite(b))
     if not estimate_variance and not get_residual:
-        return b
+        return b, x
 
     if get_residual:
-        return b, error
+        return b, x, error
 
     if estimate_variance: 
         assert b.shape[0] == x.shape[1]
@@ -217,4 +217,4 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
         inv_r = scipy.linalg.solve_triangular(r, np.eye(r.shape[0]))
         inv_x_prime_x = inv_r.dot(inv_r.T)
         V = inv_x_prime_x * error.dot(error) / (len(y) - x.shape[1])
-        return b, error, V
+        return b, x, error, V
