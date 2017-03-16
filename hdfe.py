@@ -68,10 +68,16 @@ else:
                     result[self.indices[k]] = function(array[self.indices[k]])
 
             else:
-                result = np.zeros((self.n_keys, width))
-                for k in range(self.n_keys):
-                    result[self.keys_as_int[self.first_occurrences[k]], :] = \
-                                         function(array[self.indices[k]])
+                if width is None:
+                    result = np.zeros(self.n_keys)
+                    for k in range(self.n_keys):
+                        result[self.keys_as_int[self.first_occurrences[k]]] =\
+                                function(array[self.indices[k]])
+                else:
+                    result = np.zeros((self.n_keys, width))
+                    for k in range(self.n_keys):
+                        result[self.keys_as_int[self.first_occurrences[k]], :] = \
+                                             function(array[self.indices[k]])
             return result
         
 
