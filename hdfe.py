@@ -1,30 +1,32 @@
 import numpy as np
 import scipy.sparse as sps
 import scipy.sparse.linalg as sps_linalg
+import scipy.linalg
 import time
+from multicollinearity import remove_collinear_cols
 
-# whether to profile
-if True :
-    def profile(function):
-        return function
 
 expand_dims = lambda v: np.expand_dims(v, 1) if len(v.shape) == 1 else v
 
+def make_dummies(elt, drop_col):
+    if np.max(elt) >= len(set(elt)):
+        _, elt = np.unique(elt, return_inverse=True)
+
+    dummies = sps.csc_matrix((np.ones(len(elt)), (range(len(elt)), elt)))
+    if drop_col:
+        return dummies[:, :-1]
+    else:
+        return dummies
+
         
 def get_all_dummies(categorical_data, drop):
-    
-    def get_dummies(v):
-        _, data_as_int = np.unique(v, return_inverse = True)
-        dummies = sps.csc_matrix((np.ones(len(v)), (range(len(v)),data_as_int)))
-        if drop:
-            dummies = dummies[:, :-1]
-        return dummies
     if len(categorical_data.shape) == 1 or categorical_data.shape[1] == 1:
-        return get_dummies(categorical_data)
+        return get_dummies(categorical_data, False)
 
     num_fes = categorical_data.shape[1]
-    return sps.hstack([get_dummies(categorical_data[:, col]) 
-                       for col in range(num_fes)])
+    return sps.hstack((get_dummies(categorical_data[:, 0]),
+                    sps.hstack((get_dummies(categorical_data[:, col]))
+                       for col in range(num_fes))))
 
 
 cpp = False
@@ -32,31 +34,26 @@ if cpp:
     import cppimport
     cppplay = cppimport.imp("cppplay")
     class Groupby:
-        @profile
         def __init__(self, keys):
             _, self.keys_as_int = np.unique(keys, return_inverse = True)
             self.internal = cppplay.Groupby(self.keys_as_int)
         
-        @profile
         def apply(self, function, vector):
             return self.internal.apply_2(vector, function)
 else:
     class Groupby:
-        @profile
         def __init__(self, keys):
             _, self.first_occurrences, self.keys_as_int = \
                      np.unique(keys, return_index = True, return_inverse = True)
             self.n_keys = max(self.keys_as_int) + 1
             self.set_indices()
 
-        @profile
         def set_indices(self):
             self.indices = [[] for i in range(self.n_keys)]
             for i, k in enumerate(self.keys_as_int):
                 self.indices[k].append(i)
             self.indices = [np.array(elt) for elt in self.indices]
 
-        @profile
         def apply(self, function, array, broadcast=True, width=None):
             if broadcast:
                 if width is None:
@@ -82,7 +79,6 @@ else:
         
 
 # TODO: recover fixed effects
-@profile
 def estimate_with_alternating_projections(y, z, categorical_data):
     k =  z.shape[1]
     if k == 1: 
@@ -110,9 +106,9 @@ def estimate_with_alternating_projections(y, z, categorical_data):
         z_projected[:, col] = z[:, col] - np.sum(fixed_effects, 1)
 
     beta = np.linalg.lstsq(z_projected, y)[0]
-
     return beta, fixed_effects
     
+
 def estimate_within(y, z, categorical_data):
     assert(len(categorical_data.shape) == 1 or categorical_data.shape[1] == 1)
     grouped = Groupby(categorical_data)
@@ -165,4 +161,60 @@ def estimate_coefficients(y, z, categorical_data, method):
     assert(False)
     return
 
+# Automatically picks best method, takes pandas df
+# TODO: return variance estimate if desired
+def estimate(data, y, x, categorical_controls, check_rank=False, 
+             estimate_variance=False, get_residual=False):
+    """
+    data: pandas dataframe
+    y: 1d numpy array
+    x: numpy array
+    categorical_controls: list of strings that are columns in data
+    """
 
+    if categorical_controls is None:
+        b = np.linalg.lstsq(x, y)[0]
+        if estimate_variance or get_residual:
+            error = y - x.dot(b)
+    # within estimator
+    elif len(categorical_controls) == 1:
+        grouped = Groupby(data[categorical_controls[0]])
+        x_demeaned = grouped.apply(lambda z: z - np.mean(z), x)
+        b = np.linalg.lstsq(x_demeaned, y)[0]
+        error = y - x.dot(b)
+        fixed_effects = grouped.apply(np.mean, error, broadcast=False)
+        b = np.concatenate((fixed_effects, b))
+        if estimate_variance or get_residual:
+            error -= fixed_effects[data[categorical_controls[0]].values]
+            x = sps.hstack((make_dummies(data[categorical_controls[0]], False), x))
+            assert b.shape[0] == x.shape[1]
+    else:
+        dummies = get_all_dummies(data[categorical_controls].values)
+        x = sps.hstack((dummies, x))
+        if check_rank:
+            rank = np.linalg.matrix_rank(x.todense())
+            if rank < x.shape[1]:
+                warnings.warn('x is rank deficient, attempting to correct')
+                x = remove_collinear_cols(x)
+        b = sps.linalg.lsqr(x, y)[0]
+        if estimate_variance or get_residual:
+            errors = y - x.dot(b)
+
+    assert np.all(np.isfinite(b))
+    if not estimate_variance and not get_residual:
+        return b
+
+    if get_residual:
+        return b, error
+
+    if estimate_variance: 
+        assert b.shape[0] == x.shape[1]
+        if type(x) is np.ndarray:
+           _, r = np.linalg.qr(x)
+        else:
+            _, r = np.linalg.qr(x.todense())
+
+        inv_r = scipy.linalg.solve_triangular(r, np.eye(r.shape[0]))
+        inv_x_prime_x = inv_r.dot(inv_r.T)
+        V = inv_x_prime_x * error.dot(error) / (len(y) - x.shape[1])
+        return b, error, V
