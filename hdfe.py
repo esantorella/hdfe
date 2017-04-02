@@ -218,3 +218,105 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
         inv_x_prime_x = inv_r.dot(inv_r.T)
         V = inv_x_prime_x * error.dot(error) / (len(y) - x.shape[1])
         return b, x, error, V
+
+
+def make_one_lag(array, lag, axis, fill_missing = False):
+
+    if len(array.shape) == 1:
+        array = np.expand_dims(array, 0)
+        assert(axis == 1)
+
+    # I have no idea why this is here, but it doesn't apply
+    # for usual data format
+    if abs(lag) > array.shape[axis]:
+        if fill_missing:
+            lags = np.zeros((array.shape))
+            missing = np.ones((array.shape))
+            if axis == 1:
+               return np.vstack((lags, missing))
+            else:
+                return np.hstack((lags, missing))
+        else:
+            return np.full(array.shape, np.nan)
+
+    # (1, 5) when starting with an array of size (93,5) and lag 1
+    missing_shape = (array.shape[0], abs(lag)) if axis == 1\
+                    else (abs(lag), array.shape[1])
+    # (92, 5) when starting with an array of size (93, 5) and lag 1
+    other_shape = (array.shape[0], array.shape[1] - abs(lag)) if axis ==1\
+                  else (array.shape[0] - abs(lag), array.shape[1])
+
+    if fill_missing:
+        missing_ind = np.ones(missing_shape)
+        missing_zero = np.zeros(missing_shape)
+        not_missing = np.zeros(other_shape)
+
+        if axis == 1:
+            if lag > 0:
+                lags = np.hstack((missing_zero, array[:, :-lag]))
+                missing = np.hstack((missing_ind, not_missing))
+            if lag < 0:
+                lags = np.hstack((array[:, -lag:], missing_zero)) 
+                missing = np.hstack((not_missing, missing_ind))
+            return np.vstack((lags, missing))
+        else:
+            if lag > 0:
+                # So with one lag, first row is zeros
+                lags = np.vstack((missing_zero, array[:-lag, :]))
+                missing = np.vstack((missing_ind, not_missing))
+            if lag < 0:
+                lags = np.vstack((array[-lag:, :], missing_zero))
+                missing = np.vstack((not_missing, missing_ind))
+
+            return np.hstack((lags, missing))
+
+    else:
+        missing_nan = np.full(missing_shape, np.nan)
+        if axis == 1:
+            if lag > 0:
+                return np.hstack((missing_nan, array[:, :-lag]))
+            if lag < 0:
+                return np.hstack((array[:, -lag:], missing_nan))
+        else:
+            if lag > 0:
+                return np.vstack((missing_nan, array[:-lag, :]))
+            if lag < 0:
+                return np.vstack((array[-lag:, :], missing_nan))
+
+
+def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby, 
+              fill_zeros):
+    lags = list(range(-1*n_lags_forward, 0)) + list(range(1,n_lags_back+1))
+    grouped = Groupby(df[groupby].values)
+    outcome_data = df[outcomes].values
+
+    for lag in lags:
+        f = lambda x: make_one_lag(x, lag, 0, fill_zeros)
+        shape = 2 * len(outcomes) if fill_zeros else len(outcomes)
+
+        new_data = grouped.apply(f, outcome_data, True, 
+                                 shape = shape, axis = 0)
+        new_cols = [out + '_lag_' + str(lag) for out in outcomes]
+        if fill_zeros:
+            new_cols += [out + '_lag_' + str(lag) + '_mi' 
+                         for out in outcomes]
+
+        for i, c in enumerate(new_cols):
+            df.loc[:, c] = new_data[:, i]
+
+    if fill_zeros:
+        lag_vars = {out: 
+    list(chain(*([out + '_lag_' + str(lag), out + '_lag_' + str(lag) + '_mi']
+                    for lag in lags))) for out in outcomes}
+        for out in outcomes:
+            for lag in lags:
+                name = out + '_lag_' + str(lag)
+                missing = pd.isnull(df[name]) | df[name + '_mi'] == 1
+                df.loc[missing, name] = 0 
+                df.loc[missing, name + '_mi'] = 1
+
+    else:
+        lag_vars = {out: [out + '_lag_' + str(lag) for lag in lags]
+                                                   for out in outcomes}
+
+ 
