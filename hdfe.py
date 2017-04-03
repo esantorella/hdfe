@@ -4,6 +4,8 @@ import scipy.sparse.linalg as sps_linalg
 import scipy.linalg
 import time
 from multicollinearity import remove_collinear_cols
+from itertools import chain
+import pandas as pd
 
 
 expand_dims = lambda v: np.expand_dims(v, 1) if len(v.shape) == 1 else v
@@ -295,7 +297,7 @@ def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby,
         shape = 2 * len(outcomes) if fill_zeros else len(outcomes)
 
         new_data = grouped.apply(f, outcome_data, True, 
-                                 shape = shape, axis = 0)
+                                 width = 2 * len(outcomes))
         new_cols = [out + '_lag_' + str(lag) for out in outcomes]
         if fill_zeros:
             new_cols += [out + '_lag_' + str(lag) + '_mi' 
@@ -319,4 +321,4 @@ def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby,
         lag_vars = {out: [out + '_lag_' + str(lag) for lag in lags]
                                                    for out in outcomes}
 
- 
+    return df, lag_vars 
