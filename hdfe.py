@@ -6,6 +6,7 @@ import time
 from multicollinearity import remove_collinear_cols
 from itertools import chain
 import pandas as pd
+import warnings
 
 
 expand_dims = lambda v: np.expand_dims(v, 1) if len(v.shape) == 1 else v
@@ -23,12 +24,14 @@ def make_dummies(elt, drop_col):
         
 def get_all_dummies(categorical_data, drop):
     if len(categorical_data.shape) == 1 or categorical_data.shape[1] == 1:
-        return get_dummies(categorical_data, False)
+        return make_dummies(categorical_data, False)
 
     num_fes = categorical_data.shape[1]
-    return sps.hstack((get_dummies(categorical_data[:, 0]),
-                    sps.hstack((get_dummies(categorical_data[:, col]))
-                       for col in range(num_fes))))
+    first = make_dummies(categorical_data[:, 0], False)
+    others = [make_dummies(categorical_data[:, col], True)
+              for col in range(1, num_fes)]
+    others = sps.hstack(others)
+    return sps.hstack((first, others))
 
 
 cpp = False
@@ -191,7 +194,7 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
         if estimate_variance or get_residual:
             error -= fixed_effects[data[categorical_controls[0]].values]
     else:
-        dummies = get_all_dummies(data[categorical_controls].values)
+        dummies = get_all_dummies(data[categorical_controls].values, True)
         x = sps.hstack((dummies, x))
         if check_rank:
             rank = np.linalg.matrix_rank(x.todense())
@@ -200,7 +203,7 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
                 x = remove_collinear_cols(x)
         b = sps.linalg.lsqr(x, y)[0]
         if estimate_variance or get_residual:
-            errors = y - x.dot(b)
+            error = y - x.dot(b)
 
     assert np.all(np.isfinite(b))
     if not estimate_variance and not get_residual:
@@ -297,7 +300,7 @@ def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby,
         shape = 2 * len(outcomes) if fill_zeros else len(outcomes)
 
         new_data = grouped.apply(f, outcome_data, True, 
-                                 width = 2 * len(outcomes))
+                                 width = shape)
         new_cols = [out + '_lag_' + str(lag) for out in outcomes]
         if fill_zeros:
             new_cols += [out + '_lag_' + str(lag) + '_mi' 
@@ -321,4 +324,4 @@ def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby,
         lag_vars = {out: [out + '_lag_' + str(lag) for lag in lags]
                                                    for out in outcomes}
 
-    return df, lag_vars 
+    return df, lag_vars
