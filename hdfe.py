@@ -83,6 +83,7 @@ else:
             return result
         
 
+
 # TODO: recover fixed effects
 def estimate_with_alternating_projections(y, z, categorical_data):
     k =  z.shape[1]
@@ -169,7 +170,8 @@ def estimate_coefficients(y, z, categorical_data, method):
 # Automatically picks best method, takes pandas df
 # TODO: return variance estimate if desired
 def estimate(data, y, x, categorical_controls, check_rank=False, 
-             estimate_variance=False, get_residual=False):
+             estimate_variance=False, get_residual=False,
+             cluster=None):
     """
     data: pandas dataframe
     y: 1d numpy array
@@ -221,7 +223,19 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
 
         inv_r = scipy.linalg.solve_triangular(r, np.eye(r.shape[0]))
         inv_x_prime_x = inv_r.dot(inv_r.T)
-        V = inv_x_prime_x * error.dot(error) / (len(y) - x.shape[1])
+        if cluster is not None:
+            grouped = Groupby(data[cluster])
+            def f(mat):
+                return mat[:, 1:].T.dot(mat[:, 0])
+
+            u_ = grouped.apply(f, np.hstack((np.expand_dims(error, 1), x.A)), 
+                              width = x.shape[1], broadcast=False)
+
+            inner = u_.T.dot(u_)
+            V = inv_x_prime_x.dot(inner).dot(inv_x_prime_x)
+        else:
+            V = inv_x_prime_x * error.dot(error) / (len(y) - x.shape[1])
+
         return b, x, error, V
 
 
