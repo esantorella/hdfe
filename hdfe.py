@@ -12,8 +12,7 @@ import warnings
 expand_dims = lambda v: np.expand_dims(v, 1) if len(v.shape) == 1 else v
 
 def make_dummies(elt, drop_col):
-    if np.max(elt) >= len(set(elt)):
-        _, elt = np.unique(elt, return_inverse=True)
+    _, elt = np.unique(elt, return_inverse=True)
 
     dummies = sps.csc_matrix((np.ones(len(elt)), (range(len(elt)), elt)))
     if drop_col:
@@ -34,54 +33,75 @@ def get_all_dummies(categorical_data, drop):
     return sps.hstack((first, others))
 
 
-cpp = False
-if cpp:
-    import cppimport
-    cppplay = cppimport.imp("cppplay")
-    class Groupby:
-        def __init__(self, keys):
-            _, self.keys_as_int = np.unique(keys, return_inverse = True)
-            self.internal = cppplay.Groupby(self.keys_as_int)
-        
-        def apply(self, function, vector):
-            return self.internal.apply_2(vector, function)
-else:
-    class Groupby:
-        def __init__(self, keys):
+class Groupby:
+    def __init__(self, keys):
+        if type(keys) in (np.ndarray, pd.Series) and \
+                np.issubdtype(keys.dtype, np.number) and np.all(np.diff(keys) >= 0):
+            if keys.ndim == 2:
+                if keys.shape[1] == 1:
+                    keys = keys[:, 0]
+                else:
+                    raise ValueError('keys should be 1-dimensional')
+            assert keys.ndim == 1
+
+            self.already_sorted = True
+            new_idx = np.concatenate(([1], np.diff(keys) != 0))
+            self.first_occurrences = np.where(new_idx)[0]
+            self.keys_as_int = np.cumsum(new_idx) - 1
+            self.n_keys = self.keys_as_int[-1] + 1
+
+        else:
+            self.already_sorted = False
             _, self.first_occurrences, self.keys_as_int = \
                      np.unique(keys, return_index = True, return_inverse = True)
             self.n_keys = max(self.keys_as_int) + 1
-            self.set_indices()
+        self.set_indices()
 
-        def set_indices(self):
+    def set_indices(self):
+        if self.already_sorted:
+            self.indices = [slice(i, j) for i, j in zip(self.first_occurrences[:-1],
+                                                        self.first_occurrences[1:])]
+            self.indices.append(slice(self.first_occurrences[-1], len(self.keys_as_int)))
+            self.indices = np.array(self.indices)
+        else:
             self.indices = [[] for i in range(self.n_keys)]
             for i, k in enumerate(self.keys_as_int):
                 self.indices[k].append(i)
-            self.indices = [np.array(elt) for elt in self.indices]
+            self.indices = np.array([np.array(elt) for elt in self.indices])
 
-        def apply(self, function, array, broadcast=True, width=None):
-            if broadcast:
-                if width is None:
-                    result = np.zeros(array.shape)
-                else:
-                    result = np.zeros((array.shape[0], width))
-
-                for k in range(self.n_keys):
-                    result[self.indices[k]] = function(array[self.indices[k]])
-
+    def apply(self, function, array, broadcast=True, width=None):
+        if len(array.shape) == 1:
+            array = array[:, None]
+        if broadcast:
+            if width is None:
+                result = np.zeros((array.shape[0], 1))
             else:
-                if width is None:
-                    result = np.zeros(self.n_keys)
+                result = np.zeros((array.shape[0], width))
+
+            for k in range(self.n_keys):
+                result[self.indices[k], :] = function(array[self.indices[k], :])
+                
+        else:
+            if width is None:
+                result = np.zeros(self.n_keys)
+                if self.already_sorted:
+                    for k, idx in enumerate(self.indices):
+                        result[k] = function(array[idx, :])
+                else:
                     for k in range(self.n_keys):
                         result[self.keys_as_int[self.first_occurrences[k]]] =\
-                                function(array[self.indices[k]])
+                                function(array[self.indices[k], :])
+            else:
+                result = np.zeros((self.n_keys, width))
+                if self.already_sorted:
+                    for k, idx in enumerate(self.indices):
+                        result[k, :] = function(array[idx, :])
                 else:
-                    result = np.zeros((self.n_keys, width))
-                    for k in range(self.n_keys):
+                    for k, idx in enumerate(self.indices):
                         result[self.keys_as_int[self.first_occurrences[k]], :] = \
-                                             function(array[self.indices[k]])
-            return result
-        
+                                function(array[idx, :])
+        return result
+    
 
 
 # TODO: recover fixed effects
@@ -186,7 +206,7 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
     # within estimator
     elif len(categorical_controls) == 1:
         grouped = Groupby(data[categorical_controls[0]].values)
-        x_demeaned = grouped.apply(lambda z: z - np.mean(z, 0), x)
+        x_demeaned = grouped.apply(lambda z: z - np.mean(z, 0), x, width=x.shape[1])
         b = np.linalg.lstsq(x_demeaned, y)[0]
         error = y - x.dot(b)
         fixed_effects = grouped.apply(np.mean, error, broadcast=False)
