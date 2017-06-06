@@ -197,12 +197,27 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
             error -= fixed_effects[data[categorical_controls[0]].values]
     else:
         dummies = get_all_dummies(data[categorical_controls].values, True)
+        dense_shape = x.shape[1]
         x = sps.hstack((dummies, x))
         if check_rank:
             rank = np.linalg.matrix_rank(x.todense())
             if rank < x.shape[1]:
                 warnings.warn('x is rank deficient, attempting to correct')
                 x = remove_collinear_cols(x)
+                try:
+                    x = x.A
+                except AttributeError:
+                    pass
+
+                rank = np.linalg.matrix_rank(x)
+                if rank < x.shape[1]:
+                    # Not sure why this happened, but drop a dummy as
+                    # a stupid hack
+                    x = np.hstack((x[:, :-1-dense_shape], x[:, -1 * dense_shape:]))
+                    rank = np.linalg.matrix_rank(x)
+                    if rank < x.shape[1]:
+                        import ipdb; ipdb.set_trace()
+
         b = sps.linalg.lsqr(x, y)[0]
         if estimate_variance or get_residual:
             error = y - x.dot(b)
@@ -224,6 +239,7 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
         inv_r = scipy.linalg.solve_triangular(r, np.eye(r.shape[0]))
         inv_x_prime_x = inv_r.dot(inv_r.T)
         if cluster is not None:
+            assert False
             grouped = Groupby(data[cluster])
             def f(mat):
                 return mat[:, 1:].T.dot(mat[:, 0])

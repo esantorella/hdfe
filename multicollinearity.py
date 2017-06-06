@@ -36,27 +36,31 @@ def find_collinear_cols(x):
         if row >= r.shape[0]:
             collinear_cols += list(range(col, r.shape[1]))
             break
-        if abs(r[row, col]) < 10**(-12):
+        if abs(r[row, col]) < 10**(-11):
             collinear_cols.append(col)
         else:
             non_collinear_cols.append(col)
             min_not_deleted = min(min_not_deleted, abs(r[row, col]))
             row += 1
-    print(min_not_deleted)
+    print('Minimum value of non-deleted elements', min_not_deleted)
     return collinear_cols, non_collinear_cols
 
 
 def remove_collinear_cols(x):
     collinear, not_collinear = find_collinear_cols(x)
-    print('Number of collinear columns: ', len(collinear))
-    print('Number not collinear: ', len(not_collinear))
-    print('Earliest column being removed: ', np.min(collinear))
-    print('Collinear columns: ', collinear)
-    if type(x) is sps.coo.coo_matrix:
-        x = x.asformat('csc')
-    if type(x) is sps.csc.csc_matrix:
-        return remove_cols_from_csc(x, collinear)
-    if type(x) is np.ndarray:
-        return x[:, not_collinear]
-    raise TypeError('Not implmented for type ', type(x))
+    if len(collinear) > 0:
+        print('Number of collinear columns: ', len(collinear))
+        print('Number not collinear: ', len(not_collinear))
+        print('Earliest column being removed: ', np.min(collinear))
+        print('Collinear columns: ', collinear)
+        if type(x) is sps.coo.coo_matrix:
+            x = x.asformat('csc')
+        if type(x) is sps.csc.csc_matrix:
+            return remove_cols_from_csc(x, collinear)
+        if type(x) is np.ndarray:
+            return x[:, not_collinear]
+        raise TypeError('Not implmented for type ', type(x))
+    else:
+        print('Rank-deficient, but no collinear columns found')
+        return x
 
