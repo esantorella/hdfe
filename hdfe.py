@@ -2,14 +2,10 @@ import numpy as np
 import scipy.sparse as sps
 import scipy.sparse.linalg as sps_linalg
 import scipy.linalg
-import time
 from multicollinearity import remove_collinear_cols
 from itertools import chain
 import pandas as pd
-import warnings
 
-
-expand_dims = lambda v: np.expand_dims(v, 1) if len(v.shape) == 1 else v
 
 def make_dummies(elt, drop_col):
     _, elt = np.unique(elt, return_inverse=True)
@@ -20,8 +16,8 @@ def make_dummies(elt, drop_col):
     else:
         return dummies
 
-        
-def get_all_dummies(categorical_data, drop):
+
+def get_all_dummies(categorical_data):
     if len(categorical_data.shape) == 1 or categorical_data.shape[1] == 1:
         return make_dummies(categorical_data, False)
 
@@ -53,7 +49,7 @@ class Groupby:
         else:
             self.already_sorted = False
             _, self.first_occurrences, self.keys_as_int = \
-                     np.unique(keys, return_index = True, return_inverse = True)
+                np.unique(keys, return_index=True, return_inverse=True)
             self.n_keys = max(self.keys_as_int) + 1
         self.set_indices()
 
@@ -61,15 +57,16 @@ class Groupby:
         if self.already_sorted:
             self.indices = [slice(i, j) for i, j in zip(self.first_occurrences[:-1],
                                                         self.first_occurrences[1:])]
+            assert isinstance(self.indices, list)
             self.indices.append(slice(self.first_occurrences[-1], len(self.keys_as_int)))
             self.indices = np.array(self.indices)
         else:
-            self.indices = [[] for i in range(self.n_keys)]
+            self.indices = [[] for _ in range(self.n_keys)]
             for i, k in enumerate(self.keys_as_int):
                 self.indices[k].append(i)
             self.indices = np.array([np.array(elt) for elt in self.indices])
 
-    def apply(self, function, array, broadcast=True, width=None):
+    def apply(self, function_, array, broadcast=True, width=None):
         if len(array.shape) == 1:
             array = array[:, None]
         if broadcast:
@@ -79,153 +76,95 @@ class Groupby:
                 result = np.zeros((array.shape[0], width))
 
             for k in range(self.n_keys):
-                result[self.indices[k], :] = function(array[self.indices[k], :])
-                
+                result[self.indices[k], :] = function_(array[self.indices[k], :])
+
         else:
             if width is None:
                 result = np.zeros(self.n_keys)
                 if self.already_sorted:
                     for k, idx in enumerate(self.indices):
-                        result[k] = function(array[idx, :])
+                        result[k] = function_(array[idx, :])
                 else:
                     for k in range(self.n_keys):
-                        result[self.keys_as_int[self.first_occurrences[k]]] =\
-                                function(array[self.indices[k], :])
+                        result[self.keys_as_int[self.first_occurrences[k]]] = \
+                            function_(array[self.indices[k], :])
             else:
                 result = np.zeros((self.n_keys, width))
                 if self.already_sorted:
                     for k, idx in enumerate(self.indices):
-                        result[k, :] = function(array[idx, :])
+                        result[k, :] = function_(array[idx, :])
                 else:
                     for k, idx in enumerate(self.indices):
                         result[self.keys_as_int[self.first_occurrences[k]], :] = \
-                                function(array[idx, :])
+                            function_(array[idx, :])
         return result
-    
 
-
-# TODO: recover fixed effects
-def estimate_with_alternating_projections(y, z, categorical_data):
-    k =  z.shape[1]
-    if k == 1: 
-        z = np.expand_dims(z, 1) 
-    n, num_fes = categorical_data.shape
-
-    grouped = [Groupby(categorical_data[:, i]) for i in range(num_fes)]
-    z_projected = np.zeros(z.shape)
-
-    # Project each column of z onto dummies
-    for col in range(k):
-        fixed_effects = np.zeros((n, num_fes))
-        ssr = np.dot(z[:, col], z[:, col])
-        ssr_last = 10 * ssr
-
-        while (ssr_last - ssr) / ssr_last > 10**(-5):
-            ssr_last = ssr
-            residual = z[:, col] - np.sum(fixed_effects, 1)
-            for fe in range(num_fes):
-                fixed_effects[:, fe] = fixed_effects[:, fe] \
-                            + grouped[fe].apply(lambda x: x.mean(), residual)
-                residual = z[:, col] - np.sum(fixed_effects, 1)
-            ssr = np.dot(residual, residual)
-
-        z_projected[:, col] = z[:, col] - np.sum(fixed_effects, 1)
-
-    beta = np.linalg.lstsq(z_projected, y)[0]
-    return beta, fixed_effects
-    
-
-def estimate_within(y, z, categorical_data):
-    assert(len(categorical_data.shape) == 1 or categorical_data.shape[1] == 1)
-    grouped = Groupby(categorical_data)
-    if z is None:
-        fixed_effects = grouped.apply(lambda x: x.mean(), y)    
-        return None, fixed_effects
-
-    if sps.issparse(z):
-        z = z.todense()
-    if len(z.shape) == 1: z = np.expand_dims(z, 1)
-    k = z.shape[1]
-    z_projected_resid = np.zeros(z.shape)
-    for col in range(k):
-        z_projected_resid[:, col] = np.squeeze(z[:, col] - \
-                                   grouped.apply(lambda x: x.mean(), z[:, col]))
-
-    beta = np.linalg.lstsq(z_projected_resid, y)[0]
-    fixed_effects = grouped.apply(lambda x: x.mean(), y - np.dot(z, beta))
-    return beta, fixed_effects
-        
-
-
-def estimate_brute_force(y, z, categorical_data):
-    if len(z.shape) == 1: z = np.expand_dims(z, 1)
-    if len(categorical_data.shape) == 1:
-        categorical_data = np.expand_dims(categorical_data, 1)
-
-    num_fes = categorical_data.shape[1]
-
-    dummies= get_all_dummies(categorical_data, drop=True) 
-    
-    rhs = sps.hstack((z, dummies))
-    params = sps_linalg.lsqr(rhs, y)[0]
-
-    k = z.shape[1]
-    return params[:k], dummies * params[k:]
-    
-
-def estimate_coefficients(y, z, categorical_data, method):
-    if method == 'alternating projections':
-        return estimate_with_alternating_projections(y, z, categorical_data)
-    elif method == 'brute force':
-        return estimate_brute_force(y, z, categorical_data)
-    elif method == 'exploit sparsity pattern':
-        return exploit_sparsity_pattern(y, z, categorical_data)
-    elif method == 'within':
-        return estimate_within(y, z, categorical_data)
-
-    print('You did not specify a valid method.')
-    assert(False)
-    return
 
 # Automatically picks best method, takes pandas df
 # TODO: return variance estimate if desired
-def estimate(data, y, x, categorical_controls, check_rank=False, 
-             estimate_variance=False, get_residual=False,
-             cluster=None):
-    """
-    data: pandas dataframe
-    y: 1d numpy array
-    x: numpy array
-    categorical_controls: list of strings that are columns in data
+# TODO: verbose option
+# TODO: replace data with categorical data, and get rid of 'cat' argument
+def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=False,
+             estimate_variance=False, get_residual=False, cluster=None):
     """
 
-    if categorical_controls is None:
+    :param data: Pandas DataFrame
+    :param y: 2d Numpy array
+    :param x: Numpy array
+    :param categorical_controls:
+    :param check_rank:
+    :param estimate_variance:
+    :param get_residual:
+    :param cluster:
+    :return:
+    """
+    assert y.ndim == 2
+
+    if categorical_controls is None or len(categorical_controls) == 0:
+        print('No categorical controls')
         b = np.linalg.lstsq(x, y)[0]
+        assert b.ndim == 2
         if estimate_variance or get_residual:
             error = y - x.dot(b)
+            assert error.shape == y.shape
     # within estimator
     elif len(categorical_controls) == 1:
+        print('Using within estimator')
         grouped = Groupby(data[categorical_controls[0]].values)
         x_demeaned = grouped.apply(lambda z: z - np.mean(z, 0), x, width=x.shape[1])
+        # k x n_outcomes
         b = np.linalg.lstsq(x_demeaned, y)[0]
+        assert b.ndim == 2
         error = y - x.dot(b)
-        fixed_effects = grouped.apply(np.mean, error, broadcast=False)
+        assert error.shape == y.shape
+        # n_teachers x n_outcomes
+        fixed_effects = grouped.apply(lambda arr: np.mean(arr, 0), error, broadcast=False,
+                                      width=y.shape[1])
+        assert fixed_effects.ndim == 2
+        # (n_teachers + k) x n_outcomes
         b = np.concatenate((fixed_effects, b))
-        x = sps.hstack((make_dummies(data[categorical_controls[0]], False), x))
+        x = sps.hstack((make_dummies(data[categorical_controls[0]], False), x)).tocsr()
         assert b.shape[0] == x.shape[1]
         if estimate_variance or get_residual:
             error -= fixed_effects[data[categorical_controls[0]].values]
     else:
-        dummies = get_all_dummies(data[categorical_controls].values, True)
+        dummies = get_all_dummies(data[categorical_controls].values)
         x = sps.hstack((dummies, x))
+        assert sps.issparse(x)
         if check_rank:
-            rank = np.linalg.matrix_rank(x.todense())
-            if rank < x.shape[1]:
-                warnings.warn('x is rank deficient, attempting to correct')
-                x = remove_collinear_cols(x)
+            x = sps.csc_matrix(remove_collinear_cols(x.A))
+
         b = sps.linalg.lsqr(x, y)[0]
+        print('got b')
+
         if estimate_variance or get_residual:
-            error = y - x.dot(b)
+            if b.ndim == 1:
+                b = b[:, None]
+            assert b.ndim == 2
+            predicted = x.dot(b)
+            assert y.shape == predicted.shape
+            error = y - predicted
+            assert error.shape == y.shape
 
     assert np.all(np.isfinite(b))
     if not estimate_variance and not get_residual:
@@ -234,56 +173,61 @@ def estimate(data, y, x, categorical_controls, check_rank=False,
     if get_residual:
         return b, x, error
 
-    if estimate_variance: 
+    if estimate_variance:
         assert b.shape[0] == x.shape[1]
-        if type(x) is np.ndarray:
-           _, r = np.linalg.qr(x)
-        else:
-            _, r = np.linalg.qr(x.todense())
+        _, r = np.linalg.qr(x if type(x) is np.array else x.A)
 
         inv_r = scipy.linalg.solve_triangular(r, np.eye(r.shape[0]))
         inv_x_prime_x = inv_r.dot(inv_r.T)
+        V = []
         if cluster is not None:
             grouped = Groupby(data[cluster])
+
             def f(mat):
                 return mat[:, 1:].T.dot(mat[:, 0])
 
-            u_ = grouped.apply(f, np.hstack((np.expand_dims(error, 1), x.A)), 
-                              width = x.shape[1], broadcast=False)
+            for i in range(y.shape[1]):
+                u_ = grouped.apply(f, np.hstack((error[:, i, None], x.A)),
+                                   width=x.shape[1], broadcast=False)
 
-            inner = u_.T.dot(u_)
-            V = inv_x_prime_x.dot(inner).dot(inv_x_prime_x)
+                inner = u_.T.dot(u_)
+                # really mysterious why V is rank deficient. Surely I checked this formula?
+                # Oh, I remember. the issue is having teachers with only one cluster,
+                # So fixed effects make average error zero within a cluster.
+                # TODO: see if I can take this out with more covariates.
+                V.append(inv_x_prime_x.dot(inner).dot(inv_x_prime_x))
         else:
-            V = inv_x_prime_x * error.dot(error) / (len(y) - x.shape[1])
+            error_sums = np.sum(error**2, 0)
+            assert len(error_sums) == y.shape[1]
+            V = [inv_x_prime_x * es / (len(y) - x.shape[1]) for es in error_sums]
 
         return b, x, error, V
 
 
-def make_one_lag(array, lag, axis, fill_missing = False):
-
+def make_one_lag(array, lag, axis, fill_missing=False):
     if len(array.shape) == 1:
         array = np.expand_dims(array, 0)
-        assert(axis == 1)
+        assert (axis == 1)
 
     # I have no idea why this is here, but it doesn't apply
     # for usual data format
     if abs(lag) > array.shape[axis]:
         if fill_missing:
-            lags = np.zeros((array.shape))
-            missing = np.ones((array.shape))
+            lags = np.zeros(array.shape)
+            missing = np.ones(array.shape)
             if axis == 1:
-               return np.vstack((lags, missing))
+                return np.vstack((lags, missing))
             else:
                 return np.hstack((lags, missing))
         else:
             return np.full(array.shape, np.nan)
 
     # (1, 5) when starting with an array of size (93,5) and lag 1
-    missing_shape = (array.shape[0], abs(lag)) if axis == 1\
-                    else (abs(lag), array.shape[1])
+    missing_shape = (array.shape[0], abs(lag)) if axis == 1 \
+        else (abs(lag), array.shape[1])
     # (92, 5) when starting with an array of size (93, 5) and lag 1
-    other_shape = (array.shape[0], array.shape[1] - abs(lag)) if axis ==1\
-                  else (array.shape[0] - abs(lag), array.shape[1])
+    other_shape = (array.shape[0], array.shape[1] - abs(lag)) if axis == 1 \
+        else (array.shape[0] - abs(lag), array.shape[1])
 
     if fill_missing:
         missing_ind = np.ones(missing_shape)
@@ -295,7 +239,7 @@ def make_one_lag(array, lag, axis, fill_missing = False):
                 lags = np.hstack((missing_zero, array[:, :-lag]))
                 missing = np.hstack((missing_ind, not_missing))
             if lag < 0:
-                lags = np.hstack((array[:, -lag:], missing_zero)) 
+                lags = np.hstack((array[:, -lag:], missing_zero))
                 missing = np.hstack((not_missing, missing_ind))
             return np.vstack((lags, missing))
         else:
@@ -323,41 +267,41 @@ def make_one_lag(array, lag, axis, fill_missing = False):
                 return np.vstack((array[-lag:, :], missing_nan))
 
 
-def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby, 
+def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby,
               fill_zeros):
-    lags = list(range(-1*n_lags_forward, 0)) + list(range(1,n_lags_back+1))
+    lags = list(range(-1 * n_lags_forward, 0)) + list(range(1, n_lags_back + 1))
     grouped = Groupby(df[groupby].values)
     outcome_data = df[outcomes].values
 
     for lag in lags:
-        f = lambda x: make_one_lag(x, lag, 0, fill_zeros)
+        def f(x):
+            return make_one_lag(x, lag, 0, fill_zeros)
+
         shape = 2 * len(outcomes) if fill_zeros else len(outcomes)
 
-        new_data = grouped.apply(f, outcome_data, True, 
-                                 width = shape)
+        new_data = grouped.apply(f, outcome_data, True,
+                                 width=shape)
         new_cols = [out + '_lag_' + str(lag) for out in outcomes]
         if fill_zeros:
-            new_cols += [out + '_lag_' + str(lag) + '_mi' 
+            new_cols += [out + '_lag_' + str(lag) + '_mi'
                          for out in outcomes]
 
         for i, c in enumerate(new_cols):
             df.loc[:, c] = new_data[:, i]
 
     if fill_zeros:
-        lag_vars = {out: 
-    list(chain(*([out + '_lag_' + str(lag), out + '_lag_' + str(lag) + '_mi']
-                    for lag in lags))) for out in outcomes}
+        lag_vars = {out:
+                        list(chain(*([out + '_lag_' + str(lag), out + '_lag_' + str(lag) + '_mi']
+                                     for lag in lags))) for out in outcomes}
         for out in outcomes:
             for lag in lags:
                 name = out + '_lag_' + str(lag)
                 missing = pd.isnull(df[name]) | df[name + '_mi'] == 1
-                df.loc[missing, name] = 0 
+                df.loc[missing, name] = 0
                 df.loc[missing, name + '_mi'] = 1
 
     else:
         lag_vars = {out: [out + '_lag_' + str(lag) for lag in lags]
-                                                   for out in outcomes}
+                    for out in outcomes}
 
     return df, lag_vars
-
- 
