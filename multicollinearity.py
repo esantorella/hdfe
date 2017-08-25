@@ -1,17 +1,15 @@
 import numpy as np
 import scipy.sparse as sps
-import sys
-sys.path.append('/Users/lizs/Dropbox/India bureaucrats/Bureaucrat-Value-Added/PySPQR/')
-import spqr
 
 
 def remove_cols_from_csc(x, cols_to_remove):
-    def remove_one_col(idx, ptr, data, col):
-        n_elts_to_remove = ptr[col+1] - ptr[col]
-        idx = idx[:ptr[col]] + idx[ptr[col + 1]:]
-        data = data[:ptr[col]] + data[ptr[col+1]:]
-        ptr = np.concatenate((ptr[:col], ptr[col+1:] - n_elts_to_remove))
-        return idx, ptr, data
+
+    def remove_one_col(idx, ptr_, data_, col_):
+        n_elts_to_remove = ptr_[col_ + 1] - ptr_[col_]
+        idx = idx[:ptr_[col_]] + idx[ptr_[col_ + 1]:]
+        data_ = data_[:ptr_[col_]] + data_[ptr_[col_ + 1]:]
+        ptr_ = np.concatenate((ptr_[:col_], ptr_[col_ + 1:] - n_elts_to_remove))
+        return idx, ptr_, data_
 
     indices = list(x.indices)
     ptr = x.indptr
@@ -23,24 +21,16 @@ def remove_cols_from_csc(x, cols_to_remove):
     return sps.csc_matrix((data, indices, ptr))
 
 
-def find_collinear_cols(x, tol=10**(-12)):
-    # if np.any((x!= 0).sum(0) == 0):
-    #     raise ValueError('Some columns are all zero; remove and try again')
+def find_collinear_cols(x, tol=10**(-12), verbose=False):
     k = x.shape[1]
-    if type(x) is np.ndarray:
-        full_rank = np.linalg.matrix_rank((x.T.dot(x))) == k
-        if not full_rank:
-            _, r = np.linalg.qr(x)
-    else:
-        #    assert np.all(x.sum(0) > 0)
-        _, r, e, rank = spqr.qr(x)
-        full_rank = rank == k
-        if not full_rank:
-            r = sps.csc_matrix(r)
-
+    x = np.asarray(x)
+    full_rank = np.linalg.matrix_rank((x.T.dot(x))) == k
     if full_rank:
-        print('Full rank')
+        if verbose:
+            print('Full rank')
         return [], list(range(k))
+
+    _, r = np.linalg.qr(x)
     row = 0
 
     non_collinear_cols = []
@@ -56,19 +46,21 @@ def find_collinear_cols(x, tol=10**(-12)):
             non_collinear_cols.append(col)
             min_not_deleted = min(min_not_deleted, abs(r[row, col]))
             row += 1
-    print('Minimum not deleted:', min_not_deleted)
-    if sps.issparse(x):
-        collinear_cols = e[collinear_cols]
-        non_collinear_cols = np.sort(e[non_collinear_cols])
+    if verbose:
+        print('Minimum not deleted:', min_not_deleted)
+
     return collinear_cols, non_collinear_cols
 
 
-def remove_collinear_cols(x):
-    collinear, not_collinear = find_collinear_cols(x)
+def remove_collinear_cols(x, verbose=False):
+    collinear, not_collinear = find_collinear_cols(x, verbose=verbose)
     if len(collinear) == 0:
+        if verbose:
+            print('No collinear columns')
         return x
-    print('Number of collinear columns:', len(collinear))
-    print('Number of non-collinear columns:', len(not_collinear))
+    if verbose:
+        print('Number of collinear columns:', len(collinear))
+        print('Number of non-collinear columns:', len(not_collinear))
     if type(x) is sps.coo.coo_matrix:
         x = x.asformat('csc')
     if type(x) is sps.csc.csc_matrix:

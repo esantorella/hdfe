@@ -44,6 +44,7 @@ class Groupby:
             new_idx = np.concatenate(([1], np.diff(keys) != 0))
             self.first_occurrences = np.where(new_idx)[0]
             self.keys_as_int = np.cumsum(new_idx) - 1
+            assert isinstance(self.keys_as_int, np.ndarray)
             self.n_keys = self.keys_as_int[-1] + 1
 
         else:
@@ -51,20 +52,21 @@ class Groupby:
             _, self.first_occurrences, self.keys_as_int = \
                 np.unique(keys, return_index=True, return_inverse=True)
             self.n_keys = max(self.keys_as_int) + 1
-        self.set_indices()
+        self.indices = self.set_indices()
 
     def set_indices(self):
         if self.already_sorted:
-            self.indices = [slice(i, j) for i, j in zip(self.first_occurrences[:-1],
-                                                        self.first_occurrences[1:])]
-            assert isinstance(self.indices, list)
-            self.indices.append(slice(self.first_occurrences[-1], len(self.keys_as_int)))
-            self.indices = np.array(self.indices)
+            indices = [slice(i, j) for i, j in zip(self.first_occurrences[:-1],
+                                                   self.first_occurrences[1:])]
+            assert isinstance(indices, list)
+            indices.append(slice(self.first_occurrences[-1], len(self.keys_as_int)))
+            indices = np.array(indices)
         else:
-            self.indices = [[] for _ in range(self.n_keys)]
+            indices = [[] for _ in range(self.n_keys)]
             for i, k in enumerate(self.keys_as_int):
-                self.indices[k].append(i)
-            self.indices = np.array([np.array(elt) for elt in self.indices])
+                indices[k].append(i)
+            indices = np.array([np.array(elt) for elt in indices])
+        return indices
 
     def apply(self, function_, array, broadcast=True, width=None):
         if len(array.shape) == 1:
@@ -153,7 +155,6 @@ def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=Fals
         assert sps.issparse(x)
         if check_rank:
             x = sps.csc_matrix(remove_collinear_cols(x.A))
-
         b = sps.linalg.lsqr(x, y)[0]
         print('got b')
 
@@ -179,13 +180,13 @@ def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=Fals
 
         inv_r = scipy.linalg.solve_triangular(r, np.eye(r.shape[0]))
         inv_x_prime_x = inv_r.dot(inv_r.T)
-        V = []
         if cluster is not None:
             grouped = Groupby(data[cluster])
 
             def f(mat):
                 return mat[:, 1:].T.dot(mat[:, 0])
 
+            V = []
             for i in range(y.shape[1]):
                 u_ = grouped.apply(f, np.hstack((error[:, i, None], x.A)),
                                    width=x.shape[1], broadcast=False)
