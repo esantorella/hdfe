@@ -5,6 +5,7 @@ import scipy.linalg
 from multicollinearity import remove_collinear_cols
 from itertools import chain
 import pandas as pd
+import warnings
 
 
 def make_dummies(elt, drop_col):
@@ -69,6 +70,7 @@ class Groupby:
         return indices
 
     def apply(self, function_, array, broadcast=True, width=None):
+        warnings.warn('apply is deprecated')
         if len(array.shape) == 1:
             array = array[:, None]
         if broadcast:
@@ -99,6 +101,52 @@ class Groupby:
                     for k, idx in enumerate(self.indices):
                         result[self.keys_as_int[self.first_occurrences[k]], :] = \
                             function_(array[idx, :])
+        return result
+
+    def apply_2(self, function_, array, broadcast=True, shape=None, order='C'):
+        assert isinstance(array, np.ndarray)
+        if broadcast:
+            result = np.zeros(array.shape[0] if shape is None else shape, order=order)
+            assert result.shape[0] == array.shape[0]
+
+            if self.already_sorted:
+                if array.ndim == 1:
+                    for k, idx in enumerate(self.indices):
+                        result[idx] = function_(array[idx])
+                elif array.ndim == 2:
+                    for k, idx in enumerate(self.indices):
+                        result[idx] = function_(array[idx, :])
+                elif array.ndim == 3:
+                    for k, idx in enumerate(self.indices):
+                        result[idx] = function_(array[idx, :, :])
+                else:
+                    raise NotImplementedError()
+            else:
+                for k, idx in enumerate(self.indices):
+                    result[idx] = function_(np.take(array, idx, 0))
+
+        else:
+            result = np.zeros(self.n_keys if shape is None else shape, order=order)
+            assert result.shape[0] == self.n_keys
+            if self.already_sorted:
+                # np.take doesn't allow slice arguments
+                if array.ndim == 1:
+                    for k, idx in enumerate(self.indices):
+                        result[k] = function_(array[idx])
+                elif array.ndim == 2:
+                    for k, idx in enumerate(self.indices):
+                        result[k] = function_(array[idx, :])
+                elif array.ndim == 3:
+                    for k, idx in enumerate(self.indices):
+                        result[k] = function_(array[idx, :, :])
+                else:
+                    raise NotImplementedError('Can\'t have more than 3 dims')
+
+            else:
+                for k, idx in enumerate(self.indices):
+                    result[self.keys_as_int[self.first_occurrences[k]]] \
+                        = function_(np.take(array, idx, 0))
+
         return result
 
 
@@ -155,8 +203,14 @@ def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=Fals
         assert sps.issparse(x)
         if check_rank:
             x = sps.csc_matrix(remove_collinear_cols(x.A))
-        b = sps.linalg.lsqr(x, y)[0]
-        print('got b')
+        print(x.shape)
+        print(y.shape)
+        if y.ndim == 1 or y.shape[1] == 1:
+            b = sps.linalg.lsqr(x, y)[0]
+        else:
+            b = np.zeros((x.shape[1], y.shape[1]), order='F')
+            for i in range(y.shape[1]):
+                b[:, i] = sps.linalg.lsqr(x, y[:, i], atol=1e-10)[0]
 
         if estimate_variance or get_residual:
             if b.ndim == 1:
@@ -278,10 +332,9 @@ def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby,
         def f(x):
             return make_one_lag(x, lag, 0, fill_zeros)
 
-        shape = 2 * len(outcomes) if fill_zeros else len(outcomes)
+        width = 2 * len(outcomes) if fill_zeros else len(outcomes)
 
-        new_data = grouped.apply(f, outcome_data, True,
-                                 width=shape)
+        new_data = grouped.apply_2(f, outcome_data, True, shape=(len(df), width))
         new_cols = [out + '_lag_' + str(lag) for out in outcomes]
         if fill_zeros:
             new_cols += [out + '_lag_' + str(lag) + '_mi'
@@ -291,9 +344,8 @@ def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby,
             df.loc[:, c] = new_data[:, i]
 
     if fill_zeros:
-        lag_vars = {out:
-                        list(chain(*([out + '_lag_' + str(lag), out + '_lag_' + str(lag) + '_mi']
-                                     for lag in lags))) for out in outcomes}
+        lag_vars = {out: list(chain(*([out + '_lag_' + str(lag), out + '_lag_' + str(lag) + '_mi']
+                                      for lag in lags))) for out in outcomes}
         for out in outcomes:
             for lag in lags:
                 name = out + '_lag_' + str(lag)
