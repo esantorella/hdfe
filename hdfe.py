@@ -70,6 +70,15 @@ class Groupby:
         return indices
 
     def apply(self, function_, array, broadcast=True, width=None):
+        """
+
+        :param function_:
+        :param array:
+        :param broadcast:
+        :param width:
+        :return:
+        :rtype: np.ndarray
+        """
         warnings.warn('apply is deprecated')
         if len(array.shape) == 1:
             array = array[:, None]
@@ -104,6 +113,16 @@ class Groupby:
         return result
 
     def apply_2(self, function_, array, broadcast=True, shape=None, order='C'):
+        """
+
+        :param function_:
+        :param array:
+        :param broadcast:
+        :param shape:
+        :param order:
+        :return:
+        :rtype: np.ndarray
+        """
         assert isinstance(array, np.ndarray)
         if broadcast:
             result = np.zeros(array.shape[0] if shape is None else shape, order=order)
