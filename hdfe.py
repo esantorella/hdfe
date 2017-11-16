@@ -2,14 +2,22 @@ import numpy as np
 import scipy.sparse as sps
 import scipy.sparse.linalg as sps_linalg
 import scipy.linalg
-from multicollinearity import remove_collinear_cols
+from multicollinearity import find_collinear_cols, remove_cols_from_csc
 from itertools import chain
 import pandas as pd
 from groupby import Groupby
 
 
 def make_dummies(elt, drop_col):
-    _, elt = np.unique(elt, return_inverse=True)
+    try:
+        if elt.dtype == 'category':
+            elt = elt.cat.codes
+    except TypeError:
+        pass
+    already_sorted = np.issubdtype(elt.dtype, np.integer) and np.min(elt) == 0 \
+                     and np.max(elt) == len(set(elt)) - 1
+    if not already_sorted:
+        _, elt = np.unique(elt, return_inverse=True)
 
     dummies = sps.csc_matrix((np.ones(len(elt)), (range(len(elt)), elt)))
     if drop_col:
@@ -30,14 +38,13 @@ def get_all_dummies(categorical_data):
     return sps.hstack((first, others))
 
 
-# Automatically picks best method, takes pandas df
 # TODO: return variance estimate if desired
 # TODO: verbose option
-# TODO: replace data with categorical data, and get rid of 'cat' argument
+# TODO: write tests and use Pandas groupby
 def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=False,
-             estimate_variance=False, get_residual=False, cluster=None):
+             estimate_variance=False, get_residual=False, cluster=None, tol=None):
     """
-
+    Automatically picks best method for least squares, takes pandas df
     :param data: Pandas DataFrame
     :param y: 2d Numpy array
     :param x: Numpy array
@@ -49,27 +56,48 @@ def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=Fals
     :return:
     """
     assert y.ndim == 2
+    # Use within estimator even when more than one set of fixed effects
+    within = True
 
     if categorical_controls is None or len(categorical_controls) == 0:
-        print('No categorical controls')
         b = np.linalg.lstsq(x, y)[0]
         assert b.ndim == 2
         if estimate_variance or get_residual:
             error = y - x.dot(b)
             assert error.shape == y.shape
     # within estimator
-    elif len(categorical_controls) == 1:
-        print('Using within estimator')
-        grouped = Groupby(data[categorical_controls[0]].values)
-        x_demeaned = grouped.apply(lambda z: z - np.mean(z, 0), x, shape=x.shape)
+    elif len(categorical_controls) == 1 or within:
+        if len(categorical_controls) > 1:
+            dummies = sps.hstack([make_dummies(data[col], True) for col in
+                                  categorical_controls[1:]])
+            x = np.hstack((x, dummies.A))
+
+        x_df = pd.DataFrame(data=np.hstack((data[categorical_controls[0]].values[:, None], x)),
+                            columns=list(range(x.shape[1] + 1)))
+        pandas_grouped = x_df.groupby(0)
+        x_demeaned = x - pandas_grouped[list(range(1, x_df.shape[1]))].transform(np.mean).values
+        assert x_demeaned.shape == x.shape
+
+        if check_rank:
+            if tol is not None:
+                _, not_collinear = find_collinear_cols(x_demeaned, verbose=True, tol=tol)
+            else:
+                _, not_collinear = find_collinear_cols(x_demeaned, verbose=True)
+
+            not_collinear = np.array(not_collinear)
+            x = x[:, not_collinear]
+            x_demeaned = x_demeaned[:, not_collinear]
+
         # k x n_outcomes
         b = np.linalg.lstsq(x_demeaned, y)[0]
         assert b.ndim == 2
         error = y - x.dot(b)
         assert error.shape == y.shape
+        error_df = pd.DataFrame(data=np.hstack((data[categorical_controls[0]].values[:, None], error)),
+                                columns=list(range(error.shape[1] + 1)))
+        pandas_grouped = error_df.groupby(0)
         # n_teachers x n_outcomes
-        fixed_effects = grouped.apply(lambda arr: np.mean(arr, 0), error, broadcast=False,
-                                        shape=(grouped.n_keys, y.shape[1]))
+        fixed_effects = pandas_grouped[list(range(1, error_df.shape[1]))].mean().values
         assert fixed_effects.ndim == 2
         # (n_teachers + k) x n_outcomes
         b = np.concatenate((fixed_effects, b))
@@ -79,15 +107,16 @@ def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=Fals
             error -= fixed_effects[data[categorical_controls[0]].values]
     else:
         dummies = get_all_dummies(data[categorical_controls].values)
-        x = sps.hstack((dummies, x))
+        x = sps.hstack((dummies, sps.csc_matrix(x)))
         assert sps.issparse(x)
+        assert type(x) is sps.csc_matrix
         if check_rank:
-            x = sps.csc_matrix(remove_collinear_cols(x.A))
-        print(x.shape)
-        print(y.shape)
+            collinear, _ = find_collinear_cols(x.T.dot(x).A)
+            x = remove_cols_from_csc(x, collinear)
         if y.ndim == 1 or y.shape[1] == 1:
             b = sps.linalg.lsqr(x, y)[0]
         else:
+            # TODO: there's a function for doing this all at once
             b = np.zeros((x.shape[1], y.shape[1]), order='F')
             for i in range(y.shape[1]):
                 b[:, i] = sps.linalg.lsqr(x, y[:, i], atol=1e-10)[0]
