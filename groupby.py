@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 
 class Groupby:
@@ -8,6 +9,7 @@ class Groupby:
         :param keys: List of group identifiers. Both __init__ and apply will run
             much faster if keys is already sorted.
         """
+        self.keys = keys
         try:
             already_sorted = np.issubdtype(keys.dtype, np.number) and (np.all(np.diff(keys) >= 0))
         except ValueError:
@@ -35,7 +37,6 @@ class Groupby:
         if self.already_sorted:
             indices = [slice(i, j) for i, j in zip(self.first_occurrences[:-1],
                                                    self.first_occurrences[1:])]
-            assert isinstance(indices, list)
             indices.append(slice(self.first_occurrences[-1], len(self.keys_as_int)))
             indices = np.array(indices)
         else:
@@ -45,7 +46,8 @@ class Groupby:
             indices = np.array([np.array(elt) for elt in indices])
         return indices
 
-    def apply(self, function_, array, broadcast=True, shape=None, order='c'):
+    def apply(self, function_, array, broadcast=True, shape=None, order='c',
+              as_dataframe=False):
         """
         Applies a function to each group, where groups are defined by self.keys_as_int (or, equivalently, as the
             argument of __init__.)
@@ -59,9 +61,21 @@ class Groupby:
             First dimension must be array.shape[0] (if broadcast=True)
             or self.n_keys (if broadcast=False). Default is for output to be one-dimensional.
         :param order: Should output be c-ordered or fortran-ordered?
+        :param as_dataframe: if False, returns output as ndarray; if True, returns output
+            as DataFrame with keys as indices
         :return:
-        :rtype: np.ndarray
         """
+        if isinstance(array, pd.Series):
+            names = [array.name]
+            array = np.asarray(array)
+        elif isinstance(array, pd.DataFrame):
+            names = array.columns
+            array = array.values
+        else:
+            names = None
+
+        assert isinstance(array, np.ndarray)
+
         if broadcast:
             result = np.zeros(array.shape[0] if shape is None else shape, order=order)
             assert result.shape[0] == array.shape[0]
@@ -69,39 +83,44 @@ class Groupby:
             # np.take doesn't allow slice arguments, so this has to be more verbose than when not already sorted
             if self.already_sorted:
                 if array.ndim == 1:
-                    for k, idx in enumerate(self.indices):
+                    for idx in self.indices:
                         result[idx] = function_(array[idx])
                 elif array.ndim == 2:
-                    for k, idx in enumerate(self.indices):
+                    for idx in self.indices:
                         result[idx] = function_(array[idx, :])
                 elif array.ndim == 3:
-                    for k, idx in enumerate(self.indices):
+                    for idx in self.indices:
                         result[idx] = function_(array[idx, :, :])
                 else:
                     raise NotImplementedError('Can\'t have more than 3 dims')
             else:
-                for k, idx in enumerate(self.indices):
+                for idx in self.indices:
                     result[idx] = function_(np.take(array, idx, 0))
+            if as_dataframe:
+                return pd.DataFrame(index=self.keys, data=result)
+            return result
+
+        result = np.zeros(self.n_keys if shape is None else shape, order=order)
+        assert result.shape[0] == self.n_keys
+        if self.already_sorted:
+            if array.ndim == 1:
+                for k, idx in enumerate(self.indices):
+                    result[k] = function_(array[idx])
+            elif array.ndim == 2:
+                for k, idx in enumerate(self.indices):
+                    result[k] = function_(array[idx, :])
+            elif array.ndim == 3:
+                for k, idx in enumerate(self.indices):
+                    result[k] = function_(array[idx, :, :])
+            else:
+                raise NotImplementedError('Can\'t have more than 3 dims')
 
         else:
-            result = np.zeros(self.n_keys if shape is None else shape, order=order)
-            assert result.shape[0] == self.n_keys
-            if self.already_sorted:
-                if array.ndim == 1:
-                    for k, idx in enumerate(self.indices):
-                        result[k] = function_(array[idx])
-                elif array.ndim == 2:
-                    for k, idx in enumerate(self.indices):
-                        result[k] = function_(array[idx, :])
-                elif array.ndim == 3:
-                    for k, idx in enumerate(self.indices):
-                        result[k] = function_(array[idx, :, :])
-                else:
-                    raise NotImplementedError('Can\'t have more than 3 dims')
+            for first_occurrence, idx in zip(self.first_occurrences, self.indices):
+                result[self.keys_as_int[first_occurrence]] = \
+                    function_(np.take(array, idx, 0))
 
-            else:
-                for k, idx in enumerate(self.indices):
-                    result[self.keys_as_int[self.first_occurrences[k]]] \
-                        = function_(np.take(array, idx, 0))
-
+        if as_dataframe:
+            return pd.DataFrame(index=self.keys[self.first_occurrences],
+                                data=result, columns=[names])
         return result
