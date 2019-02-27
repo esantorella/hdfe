@@ -2,7 +2,7 @@ import numpy as np
 import scipy.sparse as sps
 import scipy.sparse.linalg as sps_linalg
 import scipy.linalg
-from multicollinearity import find_collinear_cols, remove_cols_from_csc
+from multicollinearity import find_collinear_cols, _remove_cols_from_csc
 from itertools import chain
 import pandas as pd
 from groupby import Groupby
@@ -112,7 +112,7 @@ def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=Fals
         assert type(x) is sps.csc_matrix
         if check_rank:
             collinear, _ = find_collinear_cols(x.T.dot(x).A)
-            x = remove_cols_from_csc(x, collinear)
+            x = _remove_cols_from_csc(x, collinear)
         if y.ndim == 1 or y.shape[1] == 1:
             b = sps.linalg.lsqr(x, y)[0]
         else:

@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 
+# TODO: Reimplent CGroupby
 class Groupby:
     def __init__(self, keys):
         """

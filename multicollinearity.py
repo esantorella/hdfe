@@ -3,7 +3,7 @@ import scipy.sparse as sps
 import warnings
 
 
-def remove_cols_from_csc(x: sps.csc_matrix, cols_to_remove):
+def _remove_cols_from_csc(x: sps.csc_matrix, cols_to_remove):
 
     def remove_one_col(idx, ptr_, data_, col_):
         n_elts_to_remove = ptr_[col_ + 1] - ptr_[col_]
@@ -75,7 +75,7 @@ def remove_collinear_cols(x, verbose=False):
     if type(x) is sps.coo.coo_matrix:
         x = x.asformat('csc')
     if type(x) is sps.csc.csc_matrix:
-        return remove_cols_from_csc(x, collinear)
+        return _remove_cols_from_csc(x, collinear)
     if type(x) is np.ndarray:
         return x[:, not_collinear]
     raise TypeError('Not implmented for type ', type(x))
