@@ -1,21 +1,28 @@
+from itertools import chain
+from typing import Iterable, Tuple, Dict, List
+
 import numpy as np
+import pandas as pd
+import scipy.linalg
 import scipy.sparse as sps
 import scipy.sparse.linalg as sps_linalg
-import scipy.linalg
-from multicollinearity import find_collinear_cols, _remove_cols_from_csc
-from itertools import chain
-import pandas as pd
-from groupby import Groupby
+
+from .groupby import Groupby
+from .multicollinearity import find_collinear_cols, _remove_cols_from_csc
 
 
+# TODO: update link on personal website
 def make_dummies(elt, drop_col):
     try:
         if elt.dtype == 'category':
             elt = elt.cat.codes
     except TypeError:
         pass
-    already_sorted = np.issubdtype(elt.dtype, np.integer) and np.min(elt) == 0 \
-                     and np.max(elt) == len(set(elt)) - 1
+    already_sorted = (
+        np.issubdtype(elt.dtype, np.integer)
+        and np.min(elt) == 0
+        and np.max(elt) == len(set(elt)) - 1
+    )
     if not already_sorted:
         _, elt = np.unique(elt, return_inverse=True)
 
@@ -41,23 +48,23 @@ def get_all_dummies(categorical_data):
 # TODO: return variance estimate if desired
 # TODO: verbose option
 # TODO: write tests and use Pandas groupby
-def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=False,
-             estimate_variance=False, get_residual=False, cluster=None, tol=None):
+def estimate(data: pd.DataFrame,
+             y: np.ndarray,
+             x: np.ndarray,
+             categorical_controls: List,
+             check_rank=False,
+             estimate_variance=False,
+             get_residual=False,
+             cluster=None,
+             tol=None,
+             within_if_fe=True):
     """
-    Automatically picks best method for least squares, takes pandas df
-    :param data: Pandas DataFrame
-    :param y: 2d Numpy array
-    :param x: Numpy array
-    :param categorical_controls:
-    :param check_rank:
-    :param estimate_variance:
-    :param get_residual:
-    :param cluster:
-    :return:
+    Automatically picks best method for least squares
+    y must be 2d.
     """
-    assert y.ndim == 2
+    if not y.ndim == 2:
+        raise ValueError
     # Use within estimator even when more than one set of fixed effects
-    within = True
 
     if categorical_controls is None or len(categorical_controls) == 0:
         b = np.linalg.lstsq(x, y)[0]
@@ -66,7 +73,7 @@ def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=Fals
             error = y - x.dot(b)
             assert error.shape == y.shape
     # within estimator
-    elif len(categorical_controls) == 1 or within:
+    elif len(categorical_controls) == 1 or within_if_fe:
         if len(categorical_controls) > 1:
             dummies = sps.hstack([make_dummies(data[col], True) for col in
                                   categorical_controls[1:]])
@@ -151,14 +158,14 @@ def estimate(data, y: np.ndarray, x, categorical_controls: list, check_rank=Fals
 
             V = []
             for i in range(y.shape[1]):
-                u_ = grouped.apply(f, np.hstack((error[:, i, None], x.A)),
-                                     shape=(grouped.n_keys, x.shape[1]), broadcast=False)
+                u_ = grouped.apply(
+                    f,
+                    np.hstack((error[:, i, None], x.A)),
+                    shape=(grouped.n_keys, x.shape[1]),
+                    broadcast=False
+                )
 
                 inner = u_.T.dot(u_)
-                # really mysterious why V is rank deficient. Surely I checked this formula?
-                # Oh, I remember. the issue is having teachers with only one cluster,
-                # So fixed effects make average error zero within a cluster.
-                # TODO: see if I can take this out with more covariates.
                 V.append(inv_x_prime_x.dot(inner).dot(inv_x_prime_x))
         else:
             error_sums = np.sum(error**2, 0)
@@ -231,8 +238,12 @@ def make_one_lag(array, lag, axis, fill_missing=False):
                 return np.vstack((array[-lag:, :], missing_nan))
 
 
-def make_lags(df, n_lags_back, n_lags_forward, outcomes, groupby,
-              fill_zeros):
+def make_lags(df: pd.DataFrame,
+              n_lags_back: int,
+              n_lags_forward: int,
+              outcomes: List,
+              groupby: Iterable,
+              fill_zeros: bool) -> Tuple[pd.DataFrame, dict]:
     lags = list(range(-1 * n_lags_forward, 0)) + list(range(1, n_lags_back + 1))
     grouped = Groupby(df[groupby].values)
     outcome_data = df[outcomes].values

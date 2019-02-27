@@ -1,24 +1,28 @@
+import warnings
+from typing import Iterable
+
 import numpy as np
 import scipy.sparse as sps
-import warnings
 
 
-def _remove_cols_from_csc(x: sps.csc_matrix, cols_to_remove):
+def _remove_cols_from_csc(x: sps.csc_matrix, cols_to_remove: Iterable) -> sps.spmatrix:
 
     def remove_one_col(idx, ptr_, data_, col_):
         n_elts_to_remove = ptr_[col_ + 1] - ptr_[col_]
         idx = idx[:ptr_[col_]] + idx[ptr_[col_ + 1]:]
         data_ = data_[:ptr_[col_]] + data_[ptr_[col_ + 1]:]
         ptr_ = np.concatenate((ptr_[:col_], ptr_[col_ + 1:] - n_elts_to_remove))
-        return idx, ptr_, data_
+        return data_, idx, ptr_
 
-    assert sps.issparse(x)
+    if not sps.issparse(x):
+        raise ValueError
+
     indices = list(x.indices)
     ptr = x.indptr
     data = list(x.data)
 
     for i, col in enumerate(cols_to_remove):
-        indices, ptr, data = remove_one_col(indices, ptr, data, col - i)
+        data, indices, ptr = remove_one_col(indices, ptr, data, col - i)
 
     return sps.csc_matrix((data, indices, ptr))
 
@@ -72,10 +76,11 @@ def remove_collinear_cols(x, verbose=False):
     if verbose:
         print('Number of collinear columns:', len(collinear))
         print('Number of non-collinear columns:', len(not_collinear))
-    if type(x) is sps.coo.coo_matrix:
-        x = x.asformat('csc')
-    if type(x) is sps.csc.csc_matrix:
+
+    if isinstance(x, sps.csc.csc_matrix):
         return _remove_cols_from_csc(x, collinear)
-    if type(x) is np.ndarray:
+    if isinstance(x, sps.coo.coo_matrix):
+        x = x.asformat('csc')
+    if isinstance(x, np.ndarray):
         return x[:, not_collinear]
     raise TypeError('Not implmented for type ', type(x))

@@ -1,8 +1,13 @@
+from typing import Callable
 from hdfe import Groupby
 import numpy as np
 import pandas as pd
 import time
 
+"""
+Generates the results in blog post
+http://esantorella.com/2016/06/16/groupby/
+"""
 
 def print_results(pandas_1, pandas_100, groupby_1, groupby_100):
     print('time to compute group means once with Pandas: {0}'
@@ -17,7 +22,7 @@ def print_results(pandas_1, pandas_100, groupby_1, groupby_100):
     return
 
 
-def get_transform_comparisions(f, data):
+def get_transform_comparisions(f: Callable, data: pd.DataFrame):
     start = time.clock()
     pandas_answer = data.groupby('first category')['y'].transform(f)
     pandas_1 = time.clock() - start
@@ -46,7 +51,7 @@ def get_transform_comparisions(f, data):
     return pandas_1, pandas_100, groupby_one, groupby_100
 
 
-def get_apply_comparisions(f, data):
+def get_apply_comparisions(f: Callable, data: pd.DataFrame):
     start = time.clock()
     pandas_answer = data.groupby('first category')['y'].apply(f)
     pandas_1 = time.clock() - start
@@ -80,11 +85,10 @@ def get_apply_comparisions(f, data):
     return pandas_1, pandas_100, groupby_one, groupby_100
 
 
-
 def f(x): return np.mean(x)
 
 
-def make_result_df(df):
+def make_result_df(df: pd.DataFrame):
 
     result_df = pd.DataFrame(columns=['Pandas', 'Groupby'],
                              index=pd.MultiIndex.from_product((['Apply', 'Transform'],
@@ -114,21 +118,23 @@ def make_result_df(df):
     result_df /= result_df.values[0, 0]
     return result_df.apply(lambda x: np.round(x, 1))
 
-# Compute group means using Pandas groupby
-np.random.seed(int('hi', 36))
-n_iters = 1000
-n_decimals = 4
-n_obs = 10**4
-n_categories = 10**2
 
-df = pd.DataFrame({'first category': np.random.choice(n_categories, n_obs),
-                   'y': np.random.normal(0, 1, n_obs)})
-assert not Groupby(df['first category']).already_sorted
-result_table = make_result_df(df)
-print(result_table)
+if __name__ == '__main__':
+    # Compute group means using Pandas groupby
+    np.random.seed(int('hi', 36))
+    n_iters = 1000
+    n_decimals = 4
+    n_obs = 10**4
+    n_categories = 10**2
 
-# Try again when already sorted
-df.sort_values('first category', inplace=True)
-assert Groupby(df['first category']).already_sorted
-result_table = make_result_df(df)
-print(result_table)
+    df = pd.DataFrame({'first category': np.random.choice(n_categories, n_obs),
+                       'y': np.random.normal(0, 1, n_obs)})
+    assert not Groupby(df['first category']).already_sorted
+    result_table = make_result_df(df)
+    print(result_table)
+
+    # Try again when already sorted
+    df.sort_values('first category', inplace=True)
+    assert Groupby(df['first category']).already_sorted
+    result_table = make_result_df(df)
+    print(result_table)
