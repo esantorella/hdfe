@@ -1,4 +1,4 @@
-This package contains functionality useful for econometrics.
+This package contains functionality useful for econometric work with panel data.
 Its name, originally standing for "high-dimensional fixed effects," is now misleading.
 
 Useful features are
