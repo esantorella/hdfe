@@ -9,6 +9,10 @@ Generates the results in blog post
 http://esantorella.com/2016/06/16/groupby/
 """
 
+n_iters = 1000
+n_decimals = 4
+
+
 def print_results(pandas_1, pandas_100, groupby_1, groupby_100):
     print('time to compute group means once with Pandas: {0}'
           .format(round(pandas_1, n_decimals)))
@@ -23,40 +27,40 @@ def print_results(pandas_1, pandas_100, groupby_1, groupby_100):
 
 
 def get_transform_comparisions(f: Callable, data: pd.DataFrame):
-    start = time.clock()
+    start = time.perf_counter()
     pandas_answer = data.groupby('first category')['y'].transform(f)
-    pandas_1 = time.clock() - start
+    pandas_1 = time.perf_counter() - start
 
-    start = time.clock()
+    start = time.perf_counter()
     grouped = data.groupby('first category')['y']
     for i in range(n_iters):
         grouped.transform(f)
 
-    pandas_100 = time.clock() - start
+    pandas_100 = time.perf_counter() - start
 
     # Compute group means using Grouped class
-    start = time.clock()
+    start = time.perf_counter()
     y = data['y'].values
     first_category = data['first category'].values
     group_means = Groupby(first_category).apply(f, y)
-    groupby_one = time.clock() - start
+    groupby_one = time.perf_counter() - start
     np.testing.assert_almost_equal(pandas_answer.values, group_means)
 
-    start = time.clock()
+    start = time.perf_counter()
     grouped = Groupby(first_category)
     for _ in range(n_iters):
         grouped.apply(f, y)
 
-    groupby_100 = time.clock() - start
+    groupby_100 = time.perf_counter() - start
     return pandas_1, pandas_100, groupby_one, groupby_100
 
 
 def get_apply_comparisions(f: Callable, data: pd.DataFrame):
-    start = time.clock()
+    start = time.perf_counter()
     pandas_answer = data.groupby('first category')['y'].apply(f)
-    pandas_1 = time.clock() - start
+    pandas_1 = time.perf_counter() - start
 
-    start = time.clock()
+    start = time.perf_counter()
     grouped = data.groupby('first category')['y']
     if f == np.mean:
         for i in range(n_iters):
@@ -65,23 +69,23 @@ def get_apply_comparisions(f: Callable, data: pd.DataFrame):
         for i in range(n_iters):
             grouped.apply(f)
 
-    pandas_100 = time.clock() - start
+    pandas_100 = time.perf_counter() - start
 
     # Compute group means using Grouped class
-    start = time.clock()
+    start = time.perf_counter()
     first_category = data['first category'].values
     y = data['y'].values
     group_means = Groupby(first_category).apply(f, y, broadcast=False)
-    groupby_one = time.clock() - start
+    groupby_one = time.perf_counter() - start
 
     np.testing.assert_almost_equal(pandas_answer.values, group_means)
 
-    start = time.clock()
+    start = time.perf_counter()
     grouped = Groupby(first_category)
     for _ in range(n_iters):
         grouped.apply(f, y, broadcast=False)
 
-    groupby_100 = time.clock() - start
+    groupby_100 = time.perf_counter() - start
     return pandas_1, pandas_100, groupby_one, groupby_100
 
 
@@ -119,11 +123,9 @@ def make_result_df(df: pd.DataFrame):
     return result_df.apply(lambda x: np.round(x, 1))
 
 
-if __name__ == '__main__':
+def main():
     # Compute group means using Pandas groupby
     np.random.seed(int('hi', 36))
-    n_iters = 1000
-    n_decimals = 4
     n_obs = 10**4
     n_categories = 10**2
 
@@ -138,3 +140,8 @@ if __name__ == '__main__':
     assert Groupby(df['first category']).already_sorted
     result_table = make_result_df(df)
     print(result_table)
+    return
+
+
+if __name__ == '__main__':
+    main()

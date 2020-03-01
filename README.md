@@ -9,7 +9,5 @@ documentation [here](http://esantorella.com/2016/06/16/groupby/).
 for dealing with multicollinearity which operate quickly on CSC matrices.
 * make_lags: Makes within-group lags (frequently useful with panel data)
 
-You can install hdfe through pip:
-* Clone the repo
-* "cd hdfe"
-* "pip install -e ."
+You can install hdfe through pip: "pip install hdfe"
+
