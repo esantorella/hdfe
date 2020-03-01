@@ -1,17 +1,10 @@
-# uses info from: https://github.com/jupyter/docker-stacks/blob/master/base-notebook/Dockerfile
-FROM jupyter/scipy-notebook
+FROM python:3
 
 ADD . /home/jovyan/hdfe
 WORKDIR /home/jovyan/hdfe
 
-# Install genelastpricing
 USER root
-RUN pip install -e .
+RUN python setup.py install
+RUN pip install -r requirements-test.txt
+CMD ["pytest"]
 
-EXPOSE 80
-
-ENV NAME World
-
-USER $NB_UID
-WORKDIR $HOME
-CMD ["start.sh", "jupyter lab"]
