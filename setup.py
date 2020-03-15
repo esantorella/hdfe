@@ -9,7 +9,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     name="hdfe",
-    version="0.0.3",
+    version="0.0.4",
     description="Econometric tools for working with panel data and fixed effects",
     url="https://github.com/esantorella/hdfe/",
     author="Elizabeth Santorella",
