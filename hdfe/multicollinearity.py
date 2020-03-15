@@ -1,20 +1,41 @@
 import warnings
-from typing import Iterable
+from typing import Iterable, List, Tuple, Union
 
 import numpy as np
 import scipy.sparse as sps
 
 
-def _remove_cols_from_csc(x: sps.csc_matrix, cols_to_remove: Iterable) -> sps.spmatrix:
-    def remove_one_col(idx, ptr_, data_, col_):
+def remove_cols_from_csc(
+    x: sps.csc_matrix, cols_to_remove: Iterable[int]
+) -> sps.spmatrix:
+    """
+    Efficiently removes columns from a CSC sparse matrix by efficiently editing the
+    underlying data.
+    :param x: CSC sparse matrix
+    :param cols_to_remove:
+    :return: CSC sparse matrix
+
+    >>> from scipy import sparse as sps
+    >>> x = sps.eye(3, dtype=int).tocsc()
+    >>> cols_to_remove = [1]
+    >>> remove_cols_from_csc(x, cols_to_remove).A
+    array([[1, 0],
+           [0, 0],
+           [0, 1]])
+    """
+
+    if not sps.issparse(x):
+        raise ValueError
+
+    if not sps.isspmatrix_csc(x):
+        raise ValueError("Can only remove columns from a csc matrix.")
+
+    def remove_one_col(idx: List[int], ptr_: np.ndarray, data_: List[int], col_: int):
         n_elts_to_remove = ptr_[col_ + 1] - ptr_[col_]
         idx = idx[: ptr_[col_]] + idx[ptr_[col_ + 1] :]
         data_ = data_[: ptr_[col_]] + data_[ptr_[col_ + 1] :]
         ptr_ = np.concatenate((ptr_[:col_], ptr_[col_ + 1 :] - n_elts_to_remove))
         return data_, idx, ptr_
-
-    if not sps.issparse(x):
-        raise ValueError
 
     indices = list(x.indices)
     ptr = x.indptr
@@ -26,7 +47,29 @@ def _remove_cols_from_csc(x: sps.csc_matrix, cols_to_remove: Iterable) -> sps.sp
     return sps.csc_matrix((data, indices, ptr))
 
 
-def find_collinear_cols(x, tol=10 ** (-12), verbose=False):
+def find_collinear_cols(
+    x: Union[np.ndarray, sps.spmatrix], tol: float = 10 ** (-12), verbose: bool = False
+) -> Tuple[List[int], List[int]]:
+    """
+    Identifies a minimal subset of columns of x that, when removed, make x full rank.
+    Note that there may be many such subsets. This function relies on a QR decomposition
+    and may be numerically unstable.
+
+    :param x: Numpy array or something that can be converted to a Numpy array. It will
+        be converted to a Numpy array.
+    :param tol: A higher tolerance leads to erring on the side of identifying more
+        columns as collinear.
+    :param verbose:
+    :return: List of columns that when removed make x full rank, and a list of all of
+        the other columns
+
+    >>> x = np.array([[1, 1], [0, 0]])
+    >>> x
+    array([[1, 1],
+           [0, 0]])
+    >>> find_collinear_cols(x)
+    ([1], [0])
+    """
     k = x.shape[1]
     x = np.asarray(x)
     if x.shape[0] == k:
@@ -65,7 +108,18 @@ def find_collinear_cols(x, tol=10 ** (-12), verbose=False):
     return collinear_cols, non_collinear_cols
 
 
-def remove_collinear_cols(x, verbose=False):
+def remove_collinear_cols(
+    x: Union[sps.spmatrix, np.ndarray], verbose: bool = False
+) -> Union[sps.spmatrix, np.ndarray]:
+    """
+    Removes a minimal subset of columns from x such that x becomes full rank. Note that
+        these columns are not uniquely defined.
+
+    >>> x = np.array([[1, 1], [0, 0]])
+    >>> remove_collinear_cols(x)
+    array([[1],
+           [0]])
+    """
     collinear, not_collinear = find_collinear_cols(x, verbose=verbose)
     if len(collinear) == 0:
         if verbose:
@@ -76,7 +130,7 @@ def remove_collinear_cols(x, verbose=False):
         print("Number of non-collinear columns:", len(not_collinear))
 
     if isinstance(x, sps.csc.csc_matrix):
-        return _remove_cols_from_csc(x, collinear)
+        return remove_cols_from_csc(x, collinear)
     if isinstance(x, sps.coo.coo_matrix):
         x = x.asformat("csc")
     if isinstance(x, np.ndarray):

@@ -1,5 +1,5 @@
 from itertools import chain
-from typing import Iterable, Tuple, List
+from typing import Iterable, Tuple, List, Union, Dict
 
 import numpy as np
 import pandas as pd
@@ -7,11 +7,11 @@ import scipy.linalg
 import scipy.sparse as sps
 
 from .groupby import Groupby
-from .multicollinearity import find_collinear_cols, _remove_cols_from_csc
+from .multicollinearity import find_collinear_cols, remove_cols_from_csc
 
 
 # TODO: update link on personal website
-def make_dummies(elt, drop_col):
+def make_dummies(elt: Union[np.ndarray, pd.Series], drop_col: bool) -> sps.spmatrix:
     try:
         if elt.dtype == "category":
             elt = elt.cat.codes
@@ -32,7 +32,7 @@ def make_dummies(elt, drop_col):
         return dummies
 
 
-def get_all_dummies(categorical_data):
+def get_all_dummies(categorical_data: Union[np.ndarray, sps.spmatrix]) -> sps.spmatrix:
     if len(categorical_data.shape) == 1 or categorical_data.shape[1] == 1:
         return make_dummies(categorical_data, False)
 
@@ -58,10 +58,7 @@ def estimate(
     tol=None,
     within_if_fe=True,
 ):
-    """
-    Automatically picks best method for least squares
-    y must be 2d.
-    """
+    """ Automatically picks best method for least squares. y must be 2d. """
     if not y.ndim == 2:
         raise ValueError
     # Use within estimator even when more than one set of fixed effects
@@ -128,7 +125,7 @@ def estimate(
         assert type(x) is sps.csc_matrix
         if check_rank:
             collinear, _ = find_collinear_cols(x.T.dot(x).A)
-            x = _remove_cols_from_csc(x, collinear)
+            x = remove_cols_from_csc(x, collinear)
         if y.ndim == 1 or y.shape[1] == 1:
             b = sps.linalg.lsqr(x, y)[0]
         else:
@@ -184,7 +181,9 @@ def estimate(
         return b, x, error, V
 
 
-def make_one_lag(array, lag, axis, fill_missing=False):
+def make_one_lag(
+    array: np.ndarray, lag: int, axis: int, fill_missing: bool = False
+) -> np.ndarray:
     if len(array.shape) == 1:
         array = np.expand_dims(array, 0)
         assert axis == 1
@@ -255,10 +254,10 @@ def make_lags(
     df: pd.DataFrame,
     n_lags_back: int,
     n_lags_forward: int,
-    outcomes: List,
+    outcomes: List[str],
     groupby: Iterable,
     fill_zeros: bool,
-) -> Tuple[pd.DataFrame, dict]:
+) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     lags = list(range(-1 * n_lags_forward, 0)) + list(range(1, n_lags_back + 1))
     grouped = Groupby(df[groupby].values)
     outcome_data = df[outcomes].values
