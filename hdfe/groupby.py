@@ -1,10 +1,11 @@
+from typing import Union, Tuple, Callable, Any
 import numpy as np
 import pandas as pd
 
 
 # TODO: Reimplent CGroupby
 class Groupby:
-    def __init__(self, keys):
+    def __init__(self, keys: Union[np.ndarray, pd.Series]):
         """
 
         :param keys: List of group identifiers. Both __init__ and apply will run
@@ -25,7 +26,7 @@ class Groupby:
             self.already_sorted = True
             new_idx = np.concatenate(([1], np.diff(keys) != 0))
             self.first_occurrences = np.where(new_idx)[0]
-            self.keys_as_int = np.cumsum(new_idx) - 1
+            self.keys_as_int: np.ndarray = np.cumsum(new_idx) - 1
             assert isinstance(self.keys_as_int, np.ndarray)
             self.n_keys = self.keys_as_int[-1] + 1
 
@@ -54,12 +55,12 @@ class Groupby:
 
     def apply(
         self,
-        function_,
-        array,
-        broadcast=True,
-        shape=None,
-        order="c",
-        as_dataframe=False,
+        function_: Callable[[np.ndarray], Any],
+        array: Union[np.ndarray, pd.Series],
+        broadcast: bool = True,
+        shape: Tuple = None,
+        order: str = "c",
+        as_dataframe: bool = False,
     ):
         """
         Applies a function to each group, where groups are defined by self.keys_as_int
@@ -90,7 +91,7 @@ class Groupby:
             names = array.columns
             array = array.values
         else:
-            names = None
+            names = [None]
 
         assert isinstance(array, np.ndarray)
 
@@ -142,6 +143,6 @@ class Groupby:
 
         if as_dataframe:
             return pd.DataFrame(
-                index=self.keys[self.first_occurrences], data=result, columns=[names]
+                index=self.keys[self.first_occurrences], data=result, columns=names
             )
         return result
